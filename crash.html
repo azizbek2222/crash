@@ -30,7 +30,6 @@
 
         .stats-bar { width: 100%; background: #1a1a2e; padding: 5px 20px; font-size: 12px; color: #bbb; display: flex; justify-content: space-between; }
 
-        /* Jonli yutuqlar */
         .live-wins { width: 100%; height: 130px; background: #0a0a12; overflow-y: auto; padding: 10px; box-sizing: border-box; border-top: 1px solid #333; }
         .win-entry { font-size: 12px; padding: 6px 10px; border-radius: 4px; background: #16213e; margin-bottom: 4px; display: flex; justify-content: space-between; }
 
@@ -88,7 +87,7 @@
     const db = getDatabase(app);
     const tg = window.Telegram.WebApp;
 
-    // Adsgram ID ni shu yerga yozing
+    // Adsgram Init
     const AdController = window.Adsgram.init({ blockId: "int-20560" });
 
     const user = tg.initDataUnsafe?.user || { id: "test_user", first_name: "Mehmon", username: "guest" };
@@ -110,6 +109,7 @@
     let gameLoop;
     let localStatus = "";
     let lastCleanedGameId = "";
+    let isAdWatching = false;
 
     // 1. Balans
     onValue(ref(db, `users/${userId}`), (snap) => {
@@ -159,6 +159,7 @@
                     updateUI('waiting');
                     gameLoop = requestAnimationFrame(updateTick);
                 } else {
+                    // Agar foydalanuvchi joined holatida bo'lsa va hali reklama ko'rayotgan bo'lsa ham playingga o'tadi
                     if (userState === "joined") userState = "playing";
                     startFlight(data);
                 }
@@ -194,13 +195,22 @@
 
     function updateUI(status, x = 1) {
         if (status === 'waiting') {
-            actionBtn.innerText = (userState === "joined") ? "O'YINDASIZ" : "O'yinga qo'shilish";
+            actionBtn.innerText = (userState === "joined") ? "REKLAMA KO'RILYAPTI..." : "O'yinga qo'shilish";
             actionBtn.className = (userState === "joined") ? "btn-joined" : "btn-join";
             if(userState === "idle") infoText.innerText = "";
         } else {
             if (userState === "playing") {
-                actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x)} so'm`;
-                actionBtn.className = "btn-cashout";
+                // Reklama ko'rilayotgan bo'lsa tugmani faollashtirmaslik
+                if (isAdWatching) {
+                    actionBtn.innerText = "REKLAMA TUGASHINI KUTING";
+                    actionBtn.disabled = true;
+                    actionBtn.style.opacity = "0.5";
+                } else {
+                    actionBtn.disabled = false;
+                    actionBtn.style.opacity = "1";
+                    actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x)} so'm`;
+                    actionBtn.className = "btn-cashout";
+                }
             } else {
                 actionBtn.innerText = "Kutilmoqda...";
                 actionBtn.className = "btn-joined";
@@ -208,21 +218,26 @@
         }
     }
 
-    // Reklama va O'yinga qo'shilish mantiqi
     actionBtn.onclick = async () => {
         if (actionBtn.className === "btn-join" && localStatus === "waiting") {
+            isAdWatching = true;
+            userState = "joined"; // Reklama boshlanishi bilan o'yinga qo'shildi deb hisoblaymiz
+            
             try {
-                // Reklamani ko'rsatish
                 await AdController.show().then(() => {
-                    // Reklama to'liq ko'rilganda
-                    userState = "joined";
+                    // Reklama muvaffaqiyatli tugadi
+                    isAdWatching = false;
                     update(ref(db, `online_players/${userId}`), { name: userName });
-                    infoText.innerText = "Muvaffaqiyatli qo'shildingiz!";
+                    infoText.innerText = "Reklama tugadi! O'yinni kuzating.";
                 }).catch((result) => {
-                    // Reklama yopib yuborilganda yoki xatolikda
+                    // Reklama yopildi yoki xato
+                    isAdWatching = false;
+                    userState = "idle"; // O'yindan chiqarib yuboramiz
                     tg.showAlert("O'yinga kirish uchun reklamani oxirigacha ko'rishingiz kerak!");
                 });
             } catch (e) {
+                isAdWatching = false;
+                userState = "idle";
                 console.error("Adsgram error", e);
             }
         } else if (userState === "playing" && actionBtn.className === "btn-cashout") {
@@ -240,6 +255,7 @@
         multDisplay.innerText = data.targetX.toFixed(2) + "x";
         multDisplay.classList.add('crashed');
         userState = "idle";
+        isAdWatching = false; // Crash bo'lganda reklama holatini ham reset qilamiz
         push(ref(db, 'crash_history'), data.targetX);
         remove(ref(db, `online_players/${userId}`));
         setTimeout(() => { resetToNext(data); }, 500);
