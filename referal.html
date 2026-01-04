@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Referal Tizimi - Crash So'm</title>
+    <link rel="stylesheet" href="referal.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div class="header">
+        <button onclick="window.location.href='crash.html'" class="back-btn">⬅ Orqaga</button>
+        <h2>Hamkorlik Dasturi</h2>
+    </div>
+
+    <div class="container">
+        <div class="info-card">
+            <h3>Do'stlarni taklif qiling</h3>
+            <p>Har bir taklif qilingan do'stingiz yutgan summaning <b>1%</b> miqdori sizga avtomatik o'tkaziladi!</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-box">
+                <span class="label">Takliflar</span>
+                <span id="referralCount" class="value">0</span>
+            </div>
+            <div class="stat-box">
+                <span class="label">Jami daromad</span>
+                <span id="referralEarnings" class="value">0</span>
+            </div>
+        </div>
+
+        <div class="referral-link-section">
+            <p>Sizning referal havolangiz:</p>
+            <div class="link-box">
+                <input type="text" id="referralLink" readonly value="Yuklanmoqda...">
+                <button onclick="copyLink()">Nusxa</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="referal.js"></script>
+</body>
+</html>

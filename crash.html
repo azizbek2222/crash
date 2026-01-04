@@ -38,17 +38,29 @@
         .btn-join { background: #4ecca3; color: #0a0a12; }
         .btn-joined { background: #1a1a2e; color: #4ecca3; border: 2px solid #4ecca3 !important; }
         .btn-cashout { background: #e94560; color: white; box-shadow: 0 0 20px rgba(233, 69, 96, 0.4); }
+
+        .top-bar button:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+}
+
     </style>
 </head>
 <body>
 
     <div class="top-bar">
+    <div style="display: flex; align-items: center; gap: 15px;">
         <div class="brand-name">CRASH SO'M</div>
-        <div class="balance-group">
-            <div class="balance-box"><span id="balanceDisplay">0</span> so'm</div>
-            <button class="withdraw-btn" onclick="openWithdraw()">Yechish</button>
-        </div>
+        <button onclick="window.location.href='referal.html'" style="background: #1a1a2e; color: #f8b400; border: 1px solid #f8b400; padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer;">
+            👥 Referal
+        </button>
     </div>
+    <div class="balance-group">
+        <div class="balance-box"><span id="balanceDisplay">0</span> so'm</div>
+        <button class="withdraw-btn" onclick="openWithdraw()">Yechish</button>
+    </div>
+</div>
+
 
     <div class="history-bar" id="gameHistory"></div>
 
@@ -94,6 +106,10 @@
     const userId = user.id.toString();
     const userName = user.username || user.first_name;
 
+    // Telegramdan startapp parametrini olish (referal ID)
+    const urlParams = new URLSearchParams(window.location.search);
+    const startParam = tg.initDataUnsafe?.start_param || urlParams.get('tgWebAppStartParam');
+
     document.getElementById('userDisplay').innerText = "@" + userName;
 
     const multDisplay = document.getElementById('multiplier');
@@ -111,13 +127,35 @@
     let lastCleanedGameId = "";
     let isAdWatching = false;
 
-    // 1. Balans
+    // 1. Balans va Referalni tekshirish
     onValue(ref(db, `users/${userId}`), (snap) => {
         if (snap.exists()) {
-            currentBalance = snap.val().balance;
+            const data = snap.val();
+            currentBalance = data.balance;
             balanceDisplay.innerText = currentBalance.toLocaleString();
         } else {
-            set(ref(db, `users/${userId}`), { balance: 100, name: userName }); 
+            // Yangi foydalanuvchi bo'lsa
+            const newUser = { 
+                balance: 100, 
+                name: userName,
+                referralCount: 0,
+                totalRefEarnings: 0
+            };
+
+            // Agar referal orqali kelgan bo'lsa
+            if (startParam && startParam !== userId) {
+                newUser.invitedBy = startParam;
+                
+                // Taklif qilgan odamning statistikasini yangilash
+                get(ref(db, `users/${startParam}`)).then(refSnap => {
+                    if (refSnap.exists()) {
+                        update(ref(db, `users/${startParam}`), {
+                            referralCount: (refSnap.val().referralCount || 0) + 1
+                        });
+                    }
+                });
+            }
+            set(ref(db, `users/${userId}`), newUser); 
         }
     });
 
@@ -159,7 +197,6 @@
                     updateUI('waiting');
                     gameLoop = requestAnimationFrame(updateTick);
                 } else {
-                    // Agar foydalanuvchi joined holatida bo'lsa va hali reklama ko'rayotgan bo'lsa ham playingga o'tadi
                     if (userState === "joined") userState = "playing";
                     startFlight(data);
                 }
@@ -200,7 +237,6 @@
             if(userState === "idle") infoText.innerText = "";
         } else {
             if (userState === "playing") {
-                // Reklama ko'rilayotgan bo'lsa tugmani faollashtirmaslik
                 if (isAdWatching) {
                     actionBtn.innerText = "REKLAMA TUGASHINI KUTING";
                     actionBtn.disabled = true;
@@ -221,18 +257,16 @@
     actionBtn.onclick = async () => {
         if (actionBtn.className === "btn-join" && localStatus === "waiting") {
             isAdWatching = true;
-            userState = "joined"; // Reklama boshlanishi bilan o'yinga qo'shildi deb hisoblaymiz
+            userState = "joined";
             
             try {
                 await AdController.show().then(() => {
-                    // Reklama muvaffaqiyatli tugadi
                     isAdWatching = false;
                     update(ref(db, `online_players/${userId}`), { name: userName });
                     infoText.innerText = "Reklama tugadi! O'yinni kuzating.";
                 }).catch((result) => {
-                    // Reklama yopildi yoki xato
                     isAdWatching = false;
-                    userState = "idle"; // O'yindan chiqarib yuboramiz
+                    userState = "idle";
                     tg.showAlert("O'yinga kirish uchun reklamani oxirigacha ko'rishingiz kerak!");
                 });
             } catch (e) {
@@ -243,7 +277,28 @@
         } else if (userState === "playing" && actionBtn.className === "btn-cashout") {
             const xValue = parseFloat(multDisplay.innerText);
             const win = Math.floor(xValue);
+            
+            // 1. Foydalanuvchi balansini yangilash
             await update(ref(db, `users/${userId}`), { balance: currentBalance + win });
+
+            // 2. REFERAL BONUSI (1%)
+            const userSnap = await get(ref(db, `users/${userId}`));
+            const invitedBy = userSnap.val()?.invitedBy;
+
+            if (invitedBy) {
+                const refBonus = Math.floor(win * 0.01); // 1%
+                if (refBonus > 0) {
+                    const refUserRef = ref(db, `users/${invitedBy}`);
+                    const refSnap = await get(refUserRef);
+                    if (refSnap.exists()) {
+                        await update(refUserRef, {
+                            balance: refSnap.val().balance + refBonus,
+                            totalRefEarnings: (refSnap.val().totalRefEarnings || 0) + refBonus
+                        });
+                    }
+                }
+            }
+
             await push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
             userState = "idle";
             infoText.innerText = `+${win} so'm yutdingiz!`;
@@ -255,7 +310,7 @@
         multDisplay.innerText = data.targetX.toFixed(2) + "x";
         multDisplay.classList.add('crashed');
         userState = "idle";
-        isAdWatching = false; // Crash bo'lganda reklama holatini ham reset qilamiz
+        isAdWatching = false;
         push(ref(db, 'crash_history'), data.targetX);
         remove(ref(db, `online_players/${userId}`));
         setTimeout(() => { resetToNext(data); }, 500);
