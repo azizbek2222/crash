@@ -3,53 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Crash TMA - Balanced</title>
+    <title>Crash TMA - Pro</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { font-family: 'Segoe UI', Roboto, sans-serif; background: #0a0a12; color: white; height: 100vh; margin: 0; display: flex; flex-direction: column; align-items: center; overflow: hidden; }
-        .top-bar { width: 100%; padding: 10px 20px; background: #16213e; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; font-size: 14px; }
-        .balance-box { background: #1a1a2e; padding: 8px 15px; border-radius: 8px; border: 1px solid #4ecca3; color: #4ecca3; font-weight: bold; }
         
+        /* Yuqori qism va Pul yechish tugmasi */
+        .top-bar { width: 100%; padding: 10px 15px; background: #16213e; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; }
+        .balance-group { display: flex; align-items: center; gap: 10px; }
+        .balance-box { background: #1a1a2e; padding: 8px 12px; border-radius: 8px; border: 1px solid #4ecca3; color: #4ecca3; font-weight: bold; font-size: 14px; }
+        .withdraw-btn { background: #f8b400; color: #000; border: none; padding: 8px 12px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 12px; }
+
+        /* Oxirgi 10 ta natija tarixi */
+        .history-bar { width: 100%; padding: 8px 10px; background: #0f0f1a; display: flex; gap: 8px; overflow-x: auto; border-bottom: 1px solid #333; white-space: nowrap; scrollbar-width: none; }
+        .history-bar::-webkit-scrollbar { display: none; }
+        .hist-item { padding: 4px 10px; border-radius: 15px; font-size: 12px; font-weight: bold; background: #16213e; border: 1px solid #333; }
+        .hist-high { color: #4ecca3; border-color: #4ecca3; }
+        .hist-low { color: #e94560; border-color: #e94560; }
+
         .game-area { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%; position: relative; }
-        #multiplier { font-size: clamp(70px, 15vw, 120px); font-weight: bold; color: #4ecca3; z-index: 2; }
-        #timer { font-size: 50px; color: #f8b400; font-weight: bold; height: 60px; }
+        #multiplier { font-size: clamp(60px, 15vw, 110px); font-weight: bold; color: #4ecca3; }
+        #timer { font-size: 45px; color: #f8b400; font-weight: bold; height: 55px; }
         .crashed { color: #e94560 !important; }
 
-        .stats-bar { width: 100%; background: #1a1a2e; padding: 5px 20px; font-size: 12px; color: #bbb; display: flex; justify-content: space-between; border-bottom: 1px solid #333; }
+        .stats-bar { width: 100%; background: #1a1a2e; padding: 5px 20px; font-size: 12px; color: #bbb; display: flex; justify-content: space-between; }
 
-        .live-wins { width: 100%; height: 150px; background: #0f0f1a; overflow-y: auto; padding: 10px; box-sizing: border-box; border-top: 1px solid #333; }
-        .win-entry { font-size: 13px; padding: 6px 10px; border-radius: 4px; background: #16213e; margin-bottom: 5px; display: flex; justify-content: space-between; animation: slideIn 0.3s ease; }
-        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .win-name { color: #4ecca3; font-weight: 500; } 
-        .win-amount { color: #f8b400; font-weight: bold; }
+        /* Joriy raund yutuqlari */
+        .live-wins { width: 100%; height: 130px; background: #0a0a12; overflow-y: auto; padding: 10px; box-sizing: border-box; border-top: 1px solid #333; }
+        .win-entry { font-size: 12px; padding: 6px 10px; border-radius: 4px; background: #16213e; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .win-name { color: #4ecca3; }
 
-        .controls { width: 100%; padding: 20px; background: #16213e; display: flex; justify-content: center; box-sizing: border-box; }
-        #actionBtn { width: 100%; max-width: 400px; padding: 18px; font-size: 16px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; text-transform: uppercase; transition: 0.2s; }
+        .controls { width: 100%; padding: 20px; background: #16213e; display: flex; justify-content: center; }
+        #actionBtn { width: 100%; max-width: 400px; padding: 18px; font-size: 16px; font-weight: bold; border: none; border-radius: 12px; cursor: pointer; text-transform: uppercase; }
         .btn-join { background: #4ecca3; color: #0a0a12; }
         .btn-joined { background: #1a1a2e; color: #4ecca3; border: 2px solid #4ecca3 !important; }
-        .btn-cashout { background: #e94560; color: white; box-shadow: 0 0 15px rgba(233, 69, 96, 0.4); }
-        .info-text { margin-bottom: 10px; font-size: 16px; color: #f8b400; font-weight: bold; height: 20px; }
+        .btn-cashout { background: #e94560; color: white; }
     </style>
 </head>
 <body>
 
     <div class="top-bar">
         <div id="userDisplay">@user</div>
-        <div class="balance-box"><span id="balanceDisplay">0</span> so'm</div>
+        <div class="balance-group">
+            <div class="balance-box"><span id="balanceDisplay">0</span> so'm</div>
+            <button class="withdraw-btn" onclick="openWithdraw()">Yechish</button>
+        </div>
     </div>
+
+    <div class="history-bar" id="gameHistory"></div>
 
     <div class="stats-bar">
         <span>O'yinchilar: <b id="playerCount">0</b></span>
-        <span id="gameIdDisplay">Raund: #00000</span>
+        <span id="gameIdDisplay">Raund: #--</span>
     </div>
 
     <div class="game-area">
         <div id="multiplier">1.00x</div>
         <div id="timer"></div>
-        <div class="info-text" id="infoText"></div>
+        <div id="infoText" style="height: 20px; color: #f8b400; font-weight: bold;"></div>
     </div>
 
-    <div style="padding: 5px 20px; font-size: 11px; color: #555;">JORIY RAUND NATIJALARI:</div>
     <div class="live-wins" id="liveWins"></div>
 
     <div class="controls">
@@ -73,7 +86,6 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
     const tg = window.Telegram.WebApp;
-    tg.expand();
 
     const user = tg.initDataUnsafe?.user || { id: "test_user", first_name: "Mehmon", username: "guest" };
     const userId = user.id.toString();
@@ -85,7 +97,7 @@
     const timerDisplay = document.getElementById('timer');
     const balanceDisplay = document.getElementById('balanceDisplay');
     const actionBtn = document.getElementById('actionBtn');
-    const infoText = document.getElementById('infoText');
+    const historyBar = document.getElementById('gameHistory');
     const liveWins = document.getElementById('liveWins');
 
     let currentBalance = 0;
@@ -94,7 +106,7 @@
     let localStatus = "";
     let lastCleanedGameId = "";
 
-    // Balansni kuzatish
+    // 1. Balansni kuzatish
     onValue(ref(db, `users/${userId}`), (snap) => {
         if (snap.exists()) {
             currentBalance = snap.val().balance;
@@ -104,37 +116,28 @@
         }
     });
 
-    onValue(ref(db, 'online_players'), (snap) => {
-        document.getElementById('playerCount').innerText = snap.exists() ? Object.keys(snap.val()).length : 0;
-    });
-
-    // Jonli yutuqlarni kuzatish
-    onValue(ref(db, 'history'), (snap) => {
+    // 2. Oxirgi 10 ta natija tarixi
+    onValue(ref(db, 'crash_history'), (snap) => {
         if (snap.exists()) {
-            liveWins.innerHTML = "";
-            const logs = Object.values(snap.val()).reverse();
-            logs.forEach(log => {
+            historyBar.innerHTML = "";
+            const items = Object.values(snap.val()).reverse().slice(0, 10);
+            items.forEach(val => {
                 const div = document.createElement('div');
-                div.className = "win-entry";
-                div.innerHTML = `<span class="win-name">@${log.user}</span> <span>${log.x}x</span> <span class="win-amount">+${log.win} so'm</span>`;
-                liveWins.appendChild(div);
+                div.className = `hist-item ${val >= 2 ? 'hist-high' : 'hist-low'}`;
+                div.innerText = parseFloat(val).toFixed(2) + "x";
+                historyBar.appendChild(div);
             });
-        } else {
-            liveWins.innerHTML = "";
         }
     });
 
+    // 3. O'yin jarayoni
     onValue(ref(db, 'current_game'), (snapshot) => {
         const data = snapshot.val();
-        if (!data) {
-            checkQueue();
-            return;
-        }
+        if (!data) { checkQueue(); return; }
 
-        // Yangi raund boshlanganda tarixni faqat bir marta tozalash
         if (data.status === 'waiting' && lastCleanedGameId !== data.id) {
             lastCleanedGameId = data.id;
-            remove(ref(db, 'history')); 
+            remove(ref(db, 'round_winners')); 
         }
 
         localStatus = data.status;
@@ -173,16 +176,26 @@
         gameLoop = requestAnimationFrame(updateTick);
     });
 
+    // Jonli yutuqlar
+    onValue(ref(db, 'round_winners'), (snap) => {
+        liveWins.innerHTML = "";
+        if (snap.exists()) {
+            Object.values(snap.val()).reverse().forEach(log => {
+                const div = document.createElement('div');
+                div.className = "win-entry";
+                div.innerHTML = `<span class="win-name">@${log.user}</span> <span>${log.x}x</span> <b>+${log.win} so'm</b>`;
+                liveWins.appendChild(div);
+            });
+        }
+    });
+
     function updateUI(status, x = 1) {
         if (status === 'waiting') {
             actionBtn.innerText = (userState === "joined") ? "O'YINDASIZ" : "O'yinga qo'shilish";
             actionBtn.className = (userState === "joined") ? "btn-joined" : "btn-join";
-            infoText.innerText = "";
         } else {
             if (userState === "playing") {
-                // Yangi hisob-kitob: 1x = 1 so'm
-                let currentWin = Math.floor(x);
-                actionBtn.innerText = `NAQD PULLASH: ${currentWin} so'm`;
+                actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x)} so'm`;
                 actionBtn.className = "btn-cashout";
             } else {
                 actionBtn.innerText = "Kutilmoqda...";
@@ -195,16 +208,12 @@
         if (actionBtn.className === "btn-join" && localStatus === "waiting") {
             userState = "joined";
             update(ref(db, `online_players/${userId}`), { name: userName });
-            updateUI("waiting");
         } else if (userState === "playing" && actionBtn.className === "btn-cashout") {
             const xValue = parseFloat(multDisplay.innerText);
-            const win = Math.floor(xValue); // 1x uchun 1 so'm
-            
+            const win = Math.floor(xValue);
             await update(ref(db, `users/${userId}`), { balance: currentBalance + win });
-            await push(ref(db, 'history'), { user: userName, x: xValue.toFixed(2), win: win });
-            
+            await push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
             userState = "idle";
-            infoText.innerText = `+${win} so'm yutdingiz!`;
             remove(ref(db, `online_players/${userId}`));
         }
     };
@@ -212,9 +221,9 @@
     function handleCrash(data) {
         multDisplay.innerText = data.targetX.toFixed(2) + "x";
         multDisplay.classList.add('crashed');
-        infoText.innerText = "PORTLADI!";
         userState = "idle";
-        remove(ref(db, `online_players/${userId}`));
+        // Tarixga qo'shish
+        push(ref(db, 'crash_history'), data.targetX);
         setTimeout(() => { resetToNext(data); }, 500);
     }
 
@@ -222,10 +231,8 @@
         const qSnap = await get(ref(db, 'queue'));
         if (qSnap.exists()) {
             const keys = Object.keys(qSnap.val());
-            const first = qSnap.val()[keys[0]];
             runTransaction(ref(db, 'current_game'), (curr) => {
-                if (curr === null) return { status: 'waiting', targetX: first.x, id: keys[0], startTime: Date.now() };
-                return;
+                if (curr === null) return { status: 'waiting', targetX: qSnap.val()[keys[0]].x, id: keys[0], startTime: Date.now() };
             });
         }
     }
@@ -237,7 +244,6 @@
                 curr.startTime = Date.now();
                 return curr;
             }
-            return;
         });
     }
 
@@ -249,6 +255,23 @@
         updates['current_game'] = null;
         await update(ref(db), updates);
     }
+
+    // Withdraw sahifasini ochish
+    window.openWithdraw = function() {
+        tg.showPopup({
+            title: 'Pul yechish',
+            message: 'Pul yechish sahifasiga oʻtmoqchimisiz?',
+            buttons: [
+                {id: 'ok', type: 'default', text: 'Ha'},
+                {id: 'no', type: 'cancel', text: 'Yoq'}
+            ]
+        }, (id) => {
+            if (id === 'ok') {
+                // Telegram Mini App ichida boshqa sahifaga yo'naltirish
+                window.location.href = 'withdraw.html';
+            }
+        });
+    };
 </script>
 </body>
 </html>
