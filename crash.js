@@ -33,8 +33,8 @@ document.getElementById('user-name').innerText = user.first_name;
 document.getElementById('user-id').innerText = "ID: " + tgId;
 
 let myBalance = 0;
-let isJoined = false;
-let isWaitingForNext = false;
+let isJoined = false;           // Hozirgi uchishda bormi?
+let isWaitingForNext = false;   // Keyingi raund uchun navbatdami?
 let currentGameState = "idle";
 const crashPool = [1.1, 2.5, 1.2, 5.0, 1.8, 1.05, 15.0, 3.2, 1.5, 2.0];
 
@@ -42,13 +42,13 @@ const userRef = ref(db, 'users/' + tgId);
 const gameRef = ref(db, 'live_game');
 const historyRef = ref(db, 'current_round_history');
 
-// Foydalanuvchi ma'lumotlarini yuklash
+// Balansni yuklash
 onValue(userRef, (snapshot) => {
     myBalance = snapshot.val()?.balance || 0;
     balanceEl.innerText = Math.floor(myBalance);
 });
 
-// O'YIN HOLATINI KUZATISH (Client)
+// O'YIN HOLATINI KUZATISH
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
@@ -62,12 +62,22 @@ onValue(gameRef, (snapshot) => {
         crashMsg.style.display = "none";
         nextRoundTimer.style.display = "none";
         
+        // AGAR NAVBATDA TURGAN BO'LSA, UNI O'YINGA QO'SHISH
+        if (isWaitingForNext) {
+            isJoined = true;
+            isWaitingForNext = false;
+        }
+
         if (isJoined) {
             joinBtn.innerText = "O'yindasiz";
             joinBtn.className = "playing";
             joinBtn.disabled = true;
             cashoutBtn.disabled = false;
-            cashoutBtn.innerText = `Pulni olish (${Math.floor(m)} s.)`;
+            cashoutBtn.innerText = `OLISH (${Math.floor(m)} s.)`;
+        } else {
+            joinBtn.innerText = "Keyingisini kuting";
+            joinBtn.disabled = true;
+            cashoutBtn.disabled = true;
         }
     } 
     else if (currentGameState === "crashed") {
@@ -75,7 +85,7 @@ onValue(gameRef, (snapshot) => {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
         cashoutBtn.disabled = true;
-
+        
         if (data.nextIn > 0) {
             nextRoundTimer.style.display = "block";
             timerSec.innerText = data.nextIn;
@@ -83,17 +93,18 @@ onValue(gameRef, (snapshot) => {
             nextRoundTimer.style.display = "none";
         }
 
+        // Raund tugadi
         if (isJoined) {
             isJoined = false;
             tg.HapticFeedback.notificationOccurred('error');
         }
 
+        // Tugma holatini yangilash
         if (isWaitingForNext) {
-            isJoined = true;
-            isWaitingForNext = false;
-            joinBtn.innerText = "O'yindasiz";
-            joinBtn.className = "playing";
-        } else if (!isJoined) {
+            joinBtn.innerText = "Navbatdasiz...";
+            joinBtn.className = "waiting";
+            joinBtn.disabled = true;
+        } else {
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
             joinBtn.className = "";
             joinBtn.disabled = false;
@@ -101,22 +112,17 @@ onValue(gameRef, (snapshot) => {
     }
 });
 
-// Qo'shilish (Reklama bilan)
+// Reklama ko'rib qo'shilish
 joinBtn.onclick = async () => {
     joinBtn.disabled = true;
     joinBtn.innerText = "Yuklanmoqda...";
     try {
         const result = await AdController.show();
         if (result && result.done) {
-            if (currentGameState === "flying") {
-                isJoined = true;
-                joinBtn.innerText = "O'yindasiz";
-                joinBtn.className = "playing";
-            } else {
-                isWaitingForNext = true;
-                joinBtn.innerText = "Navbatga qo'shildi";
-                joinBtn.className = "waiting";
-            }
+            // Reklama tugadi, navbatga qo'shamiz
+            isWaitingForNext = true;
+            joinBtn.innerText = "Navbatdasiz...";
+            joinBtn.className = "waiting";
             tg.HapticFeedback.impactOccurred('medium');
         } else {
             joinBtn.disabled = false;
@@ -138,6 +144,7 @@ cashoutBtn.onclick = () => {
         push(historyRef, { uid: tgId, coeff: m.toFixed(2), amount: win });
         
         isJoined = false;
+        isWaitingForNext = false;
         joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         joinBtn.className = "";
         joinBtn.disabled = false;
@@ -146,54 +153,46 @@ cashoutBtn.onclick = () => {
     }
 };
 
-// O'YIN TSIZKLI (Server Loop)
-let loopStarted = false;
+// MASTER LOOP (Server mantiqi)
+let masterStarted = false;
 function startMasterLoop() {
-    if (loopStarted) return;
-    loopStarted = true;
+    if (masterStarted) return;
+    masterStarted = true;
 
     setInterval(async () => {
-        // Faqat o'yin bo'sh turganda yangi raund boshlash
         if (currentGameState === "idle" || !currentGameState) {
-            // 1. Tozalash
             await set(historyRef, null);
 
-            // 2. 15 soniya orqaga sanash
+            // 1) 15 soniya kutish
             for (let i = 15; i >= 0; i--) {
-                await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
+                await update(gameRef, { status: \"crashed\", multiplier: 1.00, nextIn: i });
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            // 3. Uchishni boshlash
+            // 2) Uchish
             const target = crashPool[Math.floor(Math.random() * crashPool.length)];
             let currentM = 1.00;
             
-            // Holatni "flying"ga o'tkazish
-            await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
+            // O'yinni boshlash
+            await update(gameRef, { status: \"flying\", multiplier: 1.00, nextIn: 0 });
 
             const flyInterval = setInterval(async () => {
-                currentM += 0.01;
+                currentM += 0.02; // Tezroq koeffitsient o'sishi
                 if (currentM >= target) {
                     clearInterval(flyInterval);
-                    // Portlash
-                    await update(gameRef, { status: "crashed", multiplier: currentM, nextIn: 15 });
-                    // 2 soniyadan keyin "idle" holatga qaytish (Loop qaytadan boshlanishi uchun)
-                    setTimeout(() => {
-                        update(gameRef, { status: "idle" });
-                    }, 2000);
+                    await update(gameRef, { status: \"crashed\", multiplier: currentM, nextIn: 15 });
+                    setTimeout(() => update(gameRef, { status: \"idle\" }), 2000);
                 } else {
-                    // Faqat multiplierni yangilash
                     update(gameRef, { multiplier: currentM });
                 }
-            }, 80); // Uchish tezligi
+            }, 100);
         }
     }, 2000);
 }
 
-// Loopni ishga tushirish
 startMasterLoop();
 
-// Yutuqlar ro'yxati
+// Tarixni ko'rsatish
 onValue(historyRef, (snapshot) => {
     const data = snapshot.val();
     historyList.innerHTML = "";
@@ -201,7 +200,7 @@ onValue(historyRef, (snapshot) => {
         Object.values(data).forEach(item => {
             const div = document.createElement('div');
             div.className = "history-item";
-            div.innerHTML = `<span>ID: ${item.uid}</span> <b>${item.coeff}x</b> <span style="color:#10b981">+${item.amount} s.</span>`;
+            div.innerHTML = `<span>ID: ${item.uid}</span> <b>${item.coeff}x</b> <span style=\"color:#10b981\">+${item.amount} s.</span>`;
             historyList.appendChild(div);
         });
     }
