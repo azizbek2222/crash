@@ -20,7 +20,6 @@ const user = tg.initDataUnsafe?.user || { id: "test_user", first_name: "Mehmon" 
 const userId = user.id.toString();
 const userName = user.username || user.first_name;
 
-// DOM elementlar
 const multDisplay = document.getElementById('multiplier');
 const timerDisplay = document.getElementById('timer');
 const balanceDisplay = document.getElementById('balanceDisplay');
@@ -32,18 +31,19 @@ let userState = "idle";
 let gameLoop;
 let localStatus = "";
 let isAdWatching = false;
-let isHandlingCrash = false; // ASOSIY QULIF: Takrorlanishni oldini oladi
+let processedGameId = ""; // Takrorlanishni oldini olish uchun asosiy kalit
 
 // 1. Balans
 onValue(ref(db, `users/${userId}`), (snap) => {
     if (snap.exists()) balanceDisplay.innerText = snap.val().balance.toLocaleString();
 });
 
-// 2. Tarix
+// 2. Tarix (Faqat oxirgi 10 tasini ko'rsatish)
 onValue(ref(db, 'crash_history'), (snap) => {
     if (snap.exists()) {
         historyBar.innerHTML = "";
-        const items = Object.values(snap.val()).reverse().slice(0, 10);
+        const data = snap.val();
+        const items = Object.values(data).reverse().slice(0, 10);
         items.forEach(val => {
             const div = document.createElement('div');
             div.className = `hist-item ${val >= 2 ? 'hist-high' : 'hist-low'}`;
@@ -56,8 +56,9 @@ onValue(ref(db, 'crash_history'), (snap) => {
 // 3. O'yin mantiqi
 onValue(ref(db, 'current_game'), (snapshot) => {
     const data = snapshot.val();
+    
     if (!data) { 
-        isHandlingCrash = false; // Yangi o'yin uchun qulfni ochish
+        processedGameId = ""; 
         checkQueue(); 
         return; 
     }
@@ -89,9 +90,9 @@ onValue(ref(db, 'current_game'), (snapshot) => {
                 updateUI('flying', currentX);
                 gameLoop = requestAnimationFrame(updateTick);
             } else {
-                // FAQAT BIR MARTA ISHLAYDI
-                if (!isHandlingCrash) {
-                    isHandlingCrash = true;
+                // Faqat ID o'zgargandagina bir marta ishlaydi
+                if (processedGameId !== data.id) {
+                    processedGameId = data.id;
                     handleCrash(data);
                 }
             }
@@ -100,7 +101,50 @@ onValue(ref(db, 'current_game'), (snapshot) => {
     gameLoop = requestAnimationFrame(updateTick);
 });
 
-// Tugma bosilishi
+async function checkQueue() {
+    const qSnap = await get(ref(db, 'queue'));
+    if (qSnap.exists()) {
+        const queueData = qSnap.val();
+        const keys = Object.keys(queueData);
+        const nextId = keys[0];
+        const nextX = queueData[nextId].x;
+
+        await runTransaction(ref(db, 'current_game'), (curr) => {
+            if (curr === null) {
+                return { status: 'waiting', targetX: nextX, id: nextId, startTime: Date.now() };
+            }
+        });
+    }
+}
+
+function startFlight(data) {
+    runTransaction(ref(db, 'current_game'), (curr) => {
+        if (curr && curr.status === 'waiting' && curr.id === data.id) {
+            curr.status = 'flying';
+            curr.startTime = Date.now();
+            return curr;
+        }
+    });
+}
+
+async function handleCrash(data) {
+    multDisplay.innerText = data.targetX.toFixed(2) + "x";
+    multDisplay.classList.add('crashed');
+    userState = "idle";
+    
+    // Tarixga yozish - Faqat bir marta
+    const historyRef = ref(db, 'crash_history');
+    await push(historyRef, data.targetX);
+    
+    // Navbatdan o'chirish va joriy o'yinni tozalashni bitta blockda qilish
+    setTimeout(async () => {
+        const updates = {};
+        updates['current_game'] = null;
+        updates[`queue/${data.id}`] = null;
+        await update(ref(db), updates);
+    }, 2000);
+}
+
 actionBtn.onclick = async () => {
     if (localStatus === "waiting" && userState === "idle") {
         isAdWatching = true;
@@ -128,44 +172,6 @@ actionBtn.onclick = async () => {
         } catch (err) { console.log(err); }
     }
 };
-
-async function checkQueue() {
-    const qSnap = await get(ref(db, 'queue'));
-    if (qSnap.exists()) {
-        const keys = Object.keys(qSnap.val());
-        const next = qSnap.val()[keys[0]];
-        await runTransaction(ref(db, 'current_game'), (curr) => {
-            if (curr === null) return { status: 'waiting', targetX: next.x, id: keys[0], startTime: Date.now() };
-        });
-    }
-}
-
-function startFlight(data) {
-    runTransaction(ref(db, 'current_game'), (curr) => {
-        if (curr && curr.status === 'waiting' && curr.id === data.id) {
-            curr.status = 'flying';
-            curr.startTime = Date.now();
-            return curr;
-        }
-    });
-}
-
-async function handleCrash(data) {
-    multDisplay.innerText = data.targetX.toFixed(2) + "x";
-    multDisplay.classList.add('crashed');
-    userState = "idle";
-    
-    // Tarixga yozish
-    await push(ref(db, 'crash_history'), data.targetX);
-    
-    // 1 soniya kutib, keyingi o'yinga o'tish
-    setTimeout(async () => {
-        const updates = {};
-        updates['current_game'] = null;
-        updates[`queue/${data.id}`] = null;
-        await update(ref(db), updates);
-    }, 1500);
-}
 
 function updateUI(status, x = 1) {
     if (status === 'waiting') {
