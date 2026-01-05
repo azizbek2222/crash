@@ -31,20 +31,19 @@ let userState = "idle";
 let gameLoop;
 let localStatus = "";
 let isAdWatching = false;
-let processedGameId = ""; // Takrorlanishni oldini olish uchun asosiy kalit
+let isProcessing = false; // ASOSIY QULF
 
 // 1. Balans
 onValue(ref(db, `users/${userId}`), (snap) => {
     if (snap.exists()) balanceDisplay.innerText = snap.val().balance.toLocaleString();
 });
 
-// 2. Tarix (Faqat oxirgi 10 tasini ko'rsatish)
+// 2. Tarixni chiqarishda duplikatsiyaga qarshi
 onValue(ref(db, 'crash_history'), (snap) => {
     if (snap.exists()) {
         historyBar.innerHTML = "";
-        const data = snap.val();
-        const items = Object.values(data).reverse().slice(0, 10);
-        items.forEach(val => {
+        const data = Object.values(snap.val()).reverse().slice(0, 10);
+        data.forEach(val => {
             const div = document.createElement('div');
             div.className = `hist-item ${val >= 2 ? 'hist-high' : 'hist-low'}`;
             div.innerText = parseFloat(val).toFixed(2) + "x";
@@ -58,7 +57,7 @@ onValue(ref(db, 'current_game'), (snapshot) => {
     const data = snapshot.val();
     
     if (!data) { 
-        processedGameId = ""; 
+        isProcessing = false;
         checkQueue(); 
         return; 
     }
@@ -90,9 +89,9 @@ onValue(ref(db, 'current_game'), (snapshot) => {
                 updateUI('flying', currentX);
                 gameLoop = requestAnimationFrame(updateTick);
             } else {
-                // Faqat ID o'zgargandagina bir marta ishlaydi
-                if (processedGameId !== data.id) {
-                    processedGameId = data.id;
+                // AGAR ALLAQACHON ISHLANAYOTGAN BO'LSA TO'XTATISH
+                if (!isProcessing) {
+                    isProcessing = true;
                     handleCrash(data);
                 }
             }
@@ -104,15 +103,10 @@ onValue(ref(db, 'current_game'), (snapshot) => {
 async function checkQueue() {
     const qSnap = await get(ref(db, 'queue'));
     if (qSnap.exists()) {
-        const queueData = qSnap.val();
-        const keys = Object.keys(queueData);
-        const nextId = keys[0];
-        const nextX = queueData[nextId].x;
-
+        const keys = Object.keys(qSnap.val());
+        const first = qSnap.val()[keys[0]];
         await runTransaction(ref(db, 'current_game'), (curr) => {
-            if (curr === null) {
-                return { status: 'waiting', targetX: nextX, id: nextId, startTime: Date.now() };
-            }
+            if (curr === null) return { status: 'waiting', targetX: first.x, id: keys[0], startTime: Date.now() };
         });
     }
 }
@@ -132,44 +126,40 @@ async function handleCrash(data) {
     multDisplay.classList.add('crashed');
     userState = "idle";
     
-    // Tarixga yozish - Faqat bir marta
-    const historyRef = ref(db, 'crash_history');
-    await push(historyRef, data.targetX);
+    // 1. Tarixga yozish
+    await push(ref(db, 'crash_history'), data.targetX);
     
-    // Navbatdan o'chirish va joriy o'yinni tozalashni bitta blockda qilish
+    // 2. Navbatdan o'chirish va joriy o'yinni tozalash (BITTA AMALDA)
     setTimeout(async () => {
         const updates = {};
         updates['current_game'] = null;
         updates[`queue/${data.id}`] = null;
         await update(ref(db), updates);
+        isProcessing = false; // Keyingi o'yin uchun qulfni ochish
     }, 2000);
 }
 
+// Tugmalar mantiqi
 actionBtn.onclick = async () => {
     if (localStatus === "waiting" && userState === "idle") {
         isAdWatching = true;
         try {
             await AdController.show();
             userState = "joined";
-            infoText.innerText = "O'yinga kirdingiz!";
+            infoText.innerText = "Qo'shildingiz!";
             updateUI('waiting');
         } catch (e) {
-            tg.showAlert("Reklamani oxirigacha ko'ring!");
+            tg.showAlert("Reklama ko'rilmadi!");
         } finally { isAdWatching = false; }
-    } 
-    else if (localStatus === "flying" && userState === "playing") {
+    } else if (localStatus === "flying" && userState === "playing") {
         const xValue = parseFloat(multDisplay.innerText);
         const win = Math.floor(xValue * 1.5);
         userState = "idle";
-        
-        try {
-            const userRef = ref(db, `users/${userId}`);
-            const snap = await get(userRef);
-            const bal = snap.val().balance || 0;
-            await update(userRef, { balance: bal + win });
-            await push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
-            infoText.innerText = `+${win} so'm yutdingiz!`;
-        } catch (err) { console.log(err); }
+        const userRef = ref(db, `users/${userId}`);
+        const snap = await get(userRef);
+        await update(userRef, { balance: (snap.val().balance || 0) + win });
+        push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
+        infoText.innerText = `+${win} so'm!`;
     }
 };
 
@@ -177,12 +167,10 @@ function updateUI(status, x = 1) {
     if (status === 'waiting') {
         actionBtn.disabled = (userState === "joined" || isAdWatching);
         actionBtn.innerText = (userState === "joined") ? "TAYYOR" : "QO'SHILISH";
-        actionBtn.className = (userState === "joined") ? "btn-joined" : "btn-join";
     } else if (status === 'flying') {
         if (userState === "playing") {
             actionBtn.disabled = false;
             actionBtn.innerText = `NAQD: ${Math.floor(x * 1.5)}`;
-            actionBtn.className = "btn-cashout";
         } else {
             actionBtn.disabled = true;
             actionBtn.innerText = "KUTING...";
