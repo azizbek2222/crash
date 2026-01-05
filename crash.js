@@ -156,8 +156,8 @@ function updateUI(status, x = 1) {
                 actionBtn.style.opacity = "0.5";
             } else {
                 actionBtn.disabled = false;
-                actionBtn.style.opacity = "2";
-                actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x)} so'm`;
+                actionBtn.style.opacity = "1";
+                actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x * 2).toLocaleString()} so'm`;
                 actionBtn.className = "btn-cashout";
             }
         } else {
@@ -197,7 +197,7 @@ actionBtn.onclick = async () => {
     actionBtn.innerText = "ISHLANMOQDA...";
 
     const xValue = parseFloat(multDisplay.innerText);
-    const win = Math.floor(xValue);
+    const win = Math.floor(xValue * 2);
     
     try {
         const userRef = ref(db, `users/${userId}`);
