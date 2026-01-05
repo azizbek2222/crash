@@ -16,13 +16,12 @@ const db = getDatabase(app);
 const tg = window.Telegram.WebApp;
 tg.expand();
 
-// Foydalanuvchi ma'lumotlari
+// Foydalanuvchi sozlamalari
 const userData = tg.initDataUnsafe?.user;
 const userId = userData?.id ? userData.id.toString() : "test_" + Math.floor(Math.random() * 1000);
 const userName = userData?.username ? "@" + userData.username : (userData?.first_name || "Mehmon");
 
-document.getElementById('userDisplay').innerText = userName;
-
+// DOM elementlar
 const multDisplay = document.getElementById('multiplier');
 const timerDisplay = document.getElementById('timer');
 const balanceDisplay = document.getElementById('balanceDisplay');
@@ -32,13 +31,21 @@ const infoText = document.getElementById('infoText');
 const playerCountEl = document.getElementById('playerCount');
 
 let userState = "idle"; // idle, joined, playing
-let gameLoop;
 let localStatus = "";
-let isAdWatching = false;
 let isProcessing = false;
-let localHistory = [];
+let gameLoop;
+let isAiEnabled = false;
 
-// Online o'yinchilar
+// 1. Online tizimi va Foydalanuvchi ma'lumotlari
+const userRef = ref(db, `users/${userId}`);
+onValue(userRef, (snap) => {
+    if (snap.exists()) {
+        balanceDisplay.innerText = snap.val().balance.toLocaleString();
+    } else {
+        set(userRef, { balance: 0, name: userName });
+    }
+});
+
 const onlineRef = ref(db, `online_players/${userId}`);
 set(onlineRef, { name: userName });
 onDisconnect(onlineRef).remove();
@@ -47,29 +54,28 @@ onValue(ref(db, 'online_players'), (snap) => {
     playerCountEl.innerText = snap.exists() ? Object.keys(snap.val()).length : 0;
 });
 
-// Balans (Faqat ko'rsatish, 5000 so'm berish olib tashlandi)
-onValue(ref(db, `users/${userId}/balance`), (snap) => {
-    balanceDisplay.innerText = snap.exists() ? snap.val().toLocaleString() : "0";
+// AI rejimini kuzatish
+onValue(ref(db, 'settings/ai_mode'), (snap) => {
+    isAiEnabled = snap.val() || false;
 });
 
-// O'yin mantiqi
+// 2. O'YINNING ASOSIY VAQTI (TICKER)
 onValue(ref(db, 'current_game'), (snapshot) => {
     const data = snapshot.val();
     
     if (!data) { 
         isProcessing = false;
-        if (userState === "joined" || userState === "playing") userState = "idle";
         multDisplay.innerText = "1.00x";
         multDisplay.classList.remove('crashed');
-        timerDisplay.innerText = "SAYLOV...";
-        setTimeout(checkQueue, 1500);
+        timerDisplay.innerText = "KUTING...";
+        checkQueue(); // Navbatni tekshirish
         return; 
     }
 
     localStatus = data.status;
     cancelAnimationFrame(gameLoop);
     
-    const updateTick = () => {
+    const tick = () => {
         const now = Date.now();
         if (data.status === 'waiting') {
             const diff = Math.ceil((data.startTime + 10000 - now) / 1000);
@@ -77,7 +83,7 @@ onValue(ref(db, 'current_game'), (snapshot) => {
                 multDisplay.innerText = "1.00x";
                 timerDisplay.innerText = diff + "s";
                 updateUI('waiting');
-                gameLoop = requestAnimationFrame(updateTick);
+                gameLoop = requestAnimationFrame(tick);
             } else {
                 startFlight(data);
             }
@@ -89,10 +95,9 @@ onValue(ref(db, 'current_game'), (snapshot) => {
 
             if (currentX < data.targetX) {
                 multDisplay.innerText = currentX.toFixed(2) + "x";
-                // Agar foydalanuvchi joined bo'lsa, uni o'yinga kiritish
                 if (userState === "joined") userState = "playing";
                 updateUI('flying', currentX);
-                gameLoop = requestAnimationFrame(updateTick);
+                gameLoop = requestAnimationFrame(tick);
             } else {
                 if (!isProcessing) {
                     isProcessing = true;
@@ -101,24 +106,38 @@ onValue(ref(db, 'current_game'), (snapshot) => {
             }
         }
     };
-    gameLoop = requestAnimationFrame(updateTick);
+    gameLoop = requestAnimationFrame(tick);
 });
 
+// 3. AI va Navbat mantiqi
 async function checkQueue() {
     if (isProcessing) return;
     const qSnap = await get(ref(db, 'queue'));
+    let nextX, nextId;
+
     if (qSnap.exists()) {
         const keys = Object.keys(qSnap.val());
-        const first = qSnap.val()[keys[0]];
-        await runTransaction(ref(db, 'current_game'), (curr) => {
-            if (curr === null) return { status: 'waiting', targetX: first.x, id: keys[0], startTime: Date.now() };
-        });
+        nextId = keys[0];
+        nextX = qSnap.val()[nextId].x;
+    } else if (isAiEnabled) {
+        // AI Algoritmi: Admin zarar ko'rmasligi uchun
+        const r = Math.random() * 100;
+        if (r < 75) nextX = 1.05 + (Math.random() * 0.45); // 75% ehtimol: 1.05x - 1.50x
+        else if (r < 98) nextX = 1.6 + (Math.random() * 2.4); // 23% ehtimol: 1.6x - 4.0x
+        else nextX = 10.0 + (Math.random() * 90); // 2% ehtimol: 10x - 100x
+        nextId = "ai_" + Date.now();
+    } else {
+        return;
     }
+
+    await runTransaction(ref(db, 'current_game'), (curr) => {
+        if (curr === null) return { status: 'waiting', targetX: parseFloat(nextX), id: nextId, startTime: Date.now() };
+    });
 }
 
 function startFlight(data) {
     runTransaction(ref(db, 'current_game'), (curr) => {
-        if (curr && curr.status === 'waiting' && curr.id === data.id) {
+        if (curr && curr.status === 'waiting') {
             curr.status = 'flying';
             curr.startTime = Date.now();
             return curr;
@@ -129,58 +148,47 @@ function startFlight(data) {
 async function handleCrash(data) {
     multDisplay.innerText = data.targetX.toFixed(2) + "x";
     multDisplay.classList.add('crashed');
-    infoText.innerText = userState === "playing" ? "Crash!" : "";
+    infoText.innerText = "CRASHED!";
     userState = "idle";
     
-    updateLocalHistory(data.targetX);
-    
+    // Tarixni yangilash
+    const histItem = document.createElement('div');
+    histItem.className = `hist-item ${data.targetX >= 2 ? 'hist-high' : 'hist-low'}`;
+    histItem.innerText = data.targetX.toFixed(2) + "x";
+    historyBar.prepend(histItem);
+
     setTimeout(async () => {
         const updates = {};
         updates['current_game'] = null;
-        updates[`queue/${data.id}`] = null;
+        if (!data.id.startsWith('ai_')) updates[`queue/${data.id}`] = null;
         await update(ref(db), updates);
-    }, 2500);
+        infoText.innerText = "";
+    }, 3000);
 }
 
-function updateLocalHistory(val) {
-    localHistory.unshift(val);
-    if (localHistory.length > 10) localHistory.pop();
-    historyBar.innerHTML = "";
-    localHistory.forEach(x => {
-        const div = document.createElement('div');
-        div.className = `hist-item ${x >= 2 ? 'hist-high' : 'hist-low'}`;
-        div.innerText = x.toFixed(2) + "x";
-        historyBar.appendChild(div);
-    });
-}
-
-// ASOSIY TUGMA ISHLASH MANTIQI
+// 4. Tugmalar (Action & Withdraw)
 actionBtn.onclick = async () => {
-    if (localStatus === "waiting" && userState === "idle" && !isAdWatching) {
-        isAdWatching = true;
+    if (localStatus === "waiting" && userState === "idle") {
         const AdController = window.Adsgram.init({ blockId: "int-20566" });
         AdController.show().then(() => {
             userState = "joined";
-            infoText.innerText = "Siz navbatdasiz!";
             updateUI('waiting');
-        }).catch(() => {
-            tg.showAlert("Reklamani ko'rmasangiz o'yinga kirmaysiz!");
-        }).finally(() => { isAdWatching = false; });
+        }).catch(() => { tg.showAlert("Reklama ko'rilmadi!"); });
     } 
     else if (localStatus === "flying" && userState === "playing") {
         const xValue = parseFloat(multDisplay.innerText);
-        const win = Math.floor(xValue * 500); // 500 so'm tikilgan deb hisoblash
-        userState = "idle"; 
+        const win = Math.floor(xValue * 500);
+        userState = "idle";
         
-        const userRef = ref(db, `users/${userId}`);
         const snap = await get(userRef);
-        const currentBal = snap.exists() ? (snap.val().balance || 0) : 0;
-        
-        await update(userRef, { balance: currentBal + win });
-        push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
+        await update(userRef, { balance: (snap.val().balance || 0) + win });
         infoText.innerText = `+${win} so'm!`;
         updateUI('flying');
     }
+};
+
+window.openWithdraw = () => {
+    tg.showAlert("Yechib olish uchun balans 50,000 so'm bo'lishi kerak!");
 };
 
 function updateUI(status, x = 1) {
@@ -190,7 +198,7 @@ function updateUI(status, x = 1) {
     } else if (status === 'flying') {
         if (userState === "playing") {
             actionBtn.disabled = false;
-            actionBtn.innerText = `YUTUQ: ${Math.floor(x * 500)}`;
+            actionBtn.innerText = `NAQD QILISH: ${Math.floor(x * 500)}`;
         } else {
             actionBtn.disabled = true;
             actionBtn.innerText = "KUTING...";
