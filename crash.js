@@ -156,7 +156,7 @@ function updateUI(status, x = 1) {
                 actionBtn.style.opacity = "0.5";
             } else {
                 actionBtn.disabled = false;
-                actionBtn.style.opacity = "1";
+                actionBtn.style.opacity = "2";
                 actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x)} so'm`;
                 actionBtn.className = "btn-cashout";
             }
@@ -208,7 +208,7 @@ actionBtn.onclick = async () => {
         await update(userRef, { 
             balance: (userData.balance || 0) + win,
             totalEarned: (userData.totalEarned || 0) + win, // Admin uchun
-            winCount: (userData.winCount || 0) + 2         // Admin uchun
+            winCount: (userData.winCount || 0) + 1         // Admin uchun
         });
 
         // Referal mantiqi... (oldingi koddagidek qoladi)
