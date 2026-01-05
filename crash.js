@@ -14,6 +14,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+// Adsgram Init (Blok ID ni o'zingiznikiga almashtiring)
+const AdController = window.Adsgram.init({ blockId: "int-20566" });
+
 const tg = window.Telegram.WebApp;
 tg.expand();
 const user = tg.initDataUnsafe?.user || { id: "Guest", first_name: "Mehmon" };
@@ -33,19 +36,17 @@ let myBalance = 0;
 let isJoined = false; 
 let isWaitingForNext = false;
 let currentGameState = "idle";
-const crashPool = [1.1, 2.5, 1.2, 5.0, 1.8, 15.0, 1.1, 3.2, 1.5, 2.0, 8.4, 1.3];
+const crashPool = [1.1, 2.5, 1.2, 5.0, 1.8, 15.0, 1.1, 3.2, 1.5, 2.0];
 
 const userRef = ref(db, 'users/' + tgId);
 const gameRef = ref(db, 'live_game');
 const historyRef = ref(db, 'current_round_history');
 
-// 1. Balans yuklash
 onValue(userRef, (snapshot) => {
     myBalance = snapshot.val()?.balance || 0;
     balanceEl.innerText = Math.floor(myBalance);
 });
 
-// 2. LIVE O'YIN VA STATISTIKA
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
@@ -56,7 +57,6 @@ onValue(gameRef, (snapshot) => {
         multiplierDisplay.innerText = m.toFixed(2) + "x";
         multiplierDisplay.style.color = "#3b82f6";
         crashMsg.style.display = "none";
-        
         if (isJoined) {
             joinBtn.innerText = "O'yindasiz";
             joinBtn.className = "playing";
@@ -69,10 +69,7 @@ onValue(gameRef, (snapshot) => {
         crashMsg.style.display = "block";
         cashoutBtn.disabled = true;
 
-        if (isJoined) {
-            isJoined = false;
-            tg.HapticFeedback.notificationOccurred('error');
-        }
+        if (isJoined) { isJoined = false; tg.HapticFeedback.notificationOccurred('error'); }
 
         if (isWaitingForNext) {
             isJoined = true;
@@ -80,58 +77,57 @@ onValue(gameRef, (snapshot) => {
             joinBtn.innerText = "O'yindasiz";
             joinBtn.className = "playing";
         } else {
-            joinBtn.innerText = "O'yinga qo'shilish";
+            joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
             joinBtn.className = "";
             joinBtn.disabled = false;
         }
     }
 });
 
-// 3. JORIY RAUND YUTUQLARINI KUZATISH (Har raundda yangilanadi)
-onValue(historyRef, (snapshot) => {
-    const data = snapshot.val();
-    historyList.innerHTML = "";
-    if (data) {
-        Object.values(data).forEach(item => {
-            const div = document.createElement('div');
-            div.className = "history-item";
-            div.innerHTML = `
-                <span class="id-part">ID: ${item.uid}</span> 
-                <span class="mult-part">${item.coeff}x</span> 
-                <span class="sum-part">${item.amount} so'm</span>`;
-            historyList.appendChild(div);
-        });
-    }
-});
-
-// 4. TUGMALAR
-joinBtn.onclick = () => {
-    if (currentGameState === "flying") {
-        isWaitingForNext = true;
+// Reklama ko'rsatish va qo'shilish funksiyasi
+async function showAdAndJoin() {
+    try {
         joinBtn.disabled = true;
-        joinBtn.innerText = "O'yinga qo'shildingiz, keyingi raundni kuting";
-        joinBtn.className = "waiting";
-    } else {
-        isJoined = true;
-        joinBtn.innerText = "O'yindasiz";
-        joinBtn.className = "playing";
+        joinBtn.innerText = "Reklama yuklanmoqda...";
+        
+        const result = await AdController.show();
+        
+        // Reklama to'liq ko'rilganda (result.done bo'lsa)
+        if (result && result.done) {
+            if (currentGameState === "flying") {
+                isWaitingForNext = true;
+                joinBtn.innerText = "Keyingi raund kutilmoqda...";
+                joinBtn.className = "waiting";
+            } else {
+                isJoined = true;
+                joinBtn.innerText = "O'yindasiz";
+                joinBtn.className = "playing";
+            }
+            tg.HapticFeedback.impactOccurred('medium');
+        } else {
+            // Reklama yopib yuborilsa
+            joinBtn.disabled = false;
+            joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
+            alert("O'yinga kirish uchun reklamani oxirigacha ko'rishingiz kerak!");
+        }
+    } catch (error) {
+        joinBtn.disabled = false;
+        joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
+        console.error("Reklama xatosi:", error);
     }
-    tg.HapticFeedback.impactOccurred('medium');
-};
+}
+
+joinBtn.onclick = showAdAndJoin;
 
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
         const m = parseFloat(multiplierDisplay.innerText);
-        const win = Math.floor(m); // Har 1x = 1 so'm
-        
+        const win = Math.floor(m);
         myBalance += win;
         update(userRef, { balance: myBalance, name: user.first_name });
-        
-        // Joriy raund statistikasiga qo'shish
         push(historyRef, { uid: tgId, coeff: m.toFixed(2), amount: win });
-
         isJoined = false;
-        joinBtn.innerText = "O'yinga qo'shilish";
+        joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         joinBtn.className = "";
         joinBtn.disabled = false;
         cashoutBtn.disabled = true;
@@ -139,17 +135,14 @@ cashoutBtn.onclick = () => {
     }
 };
 
-// 5. AVTOMATIK SERVER (Master)
+// SERVER LOOP (O'yinni boshqarish)
 function startAutoLoop() {
     setInterval(() => {
         if (currentGameState === "idle" || currentGameState === null) {
             (async () => {
-                // Yangi raund boshlanishidan oldin statistika va historyni tozalash
                 await set(historyRef, null); 
-                
                 const target = crashPool[Math.floor(Math.random() * crashPool.length)];
                 let currentM = 1.00;
-                
                 const flyInterval = setInterval(() => {
                     currentM += 0.01;
                     if (currentM >= target) {
@@ -165,3 +158,16 @@ function startAutoLoop() {
     }, 1000);
 }
 startAutoLoop();
+
+onValue(historyRef, (snapshot) => {
+    const data = snapshot.val();
+    historyList.innerHTML = "";
+    if (data) {
+        Object.values(data).forEach(item => {
+            const div = document.createElement('div');
+            div.className = "history-item";
+            div.innerHTML = `<span class="id-part">ID: ${item.uid}</span> <span class="mult-part">${item.coeff}x</span> <span class="sum-part">${item.amount} so'm</span>`;
+            historyList.appendChild(div);
+        });
+    }
+});
