@@ -14,7 +14,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Adsgram Init (Blok ID ni o'zingiznikiga almashtiring)
 const AdController = window.Adsgram.init({ blockId: "int-20566" });
 
 const tg = window.Telegram.WebApp;
@@ -31,6 +30,8 @@ const balanceEl = document.getElementById('balance-val');
 const joinBtn = document.getElementById('join-btn');
 const cashoutBtn = document.getElementById('cashout-btn');
 const historyList = document.getElementById('history-list');
+const nextRoundTimer = document.getElementById('next-round-timer');
+const timerSec = document.getElementById('timer-sec');
 
 let myBalance = 0;
 let isJoined = false; 
@@ -57,6 +58,7 @@ onValue(gameRef, (snapshot) => {
         multiplierDisplay.innerText = m.toFixed(2) + "x";
         multiplierDisplay.style.color = "#3b82f6";
         crashMsg.style.display = "none";
+        nextRoundTimer.style.display = "none";
         if (isJoined) {
             joinBtn.innerText = "O'yindasiz";
             joinBtn.className = "playing";
@@ -69,6 +71,11 @@ onValue(gameRef, (snapshot) => {
         crashMsg.style.display = "block";
         cashoutBtn.disabled = true;
 
+        if (data.nextIn > 0) {
+            nextRoundTimer.style.display = "block";
+            timerSec.innerText = data.nextIn;
+        }
+
         if (isJoined) { isJoined = false; tg.HapticFeedback.notificationOccurred('error'); }
 
         if (isWaitingForNext) {
@@ -76,7 +83,7 @@ onValue(gameRef, (snapshot) => {
             isWaitingForNext = false;
             joinBtn.innerText = "O'yindasiz";
             joinBtn.className = "playing";
-        } else {
+        } else if (!isJoined) {
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
             joinBtn.className = "";
             joinBtn.disabled = false;
@@ -84,15 +91,11 @@ onValue(gameRef, (snapshot) => {
     }
 });
 
-// Reklama ko'rsatish va qo'shilish funksiyasi
 async function showAdAndJoin() {
     try {
         joinBtn.disabled = true;
         joinBtn.innerText = "Reklama yuklanmoqda...";
-        
         const result = await AdController.show();
-        
-        // Reklama to'liq ko'rilganda (result.done bo'lsa)
         if (result && result.done) {
             if (currentGameState === "flying") {
                 isWaitingForNext = true;
@@ -105,7 +108,6 @@ async function showAdAndJoin() {
             }
             tg.HapticFeedback.impactOccurred('medium');
         } else {
-            // Reklama yopib yuborilsa
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
             alert("O'yinga kirish uchun reklamani oxirigacha ko'rishingiz kerak!");
@@ -135,22 +137,29 @@ cashoutBtn.onclick = () => {
     }
 };
 
-// SERVER LOOP (O'yinni boshqarish)
 function startAutoLoop() {
     setInterval(() => {
         if (currentGameState === "idle" || currentGameState === null) {
             (async () => {
                 await set(historyRef, null); 
+                
+                // 15 soniyalik orqaga sanash (Kutish vaqti)
+                for (let i = 15; i >= 0; i--) {
+                    await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
+                    if (i > 0) await new Promise(r => setTimeout(r, 1000));
+                }
+
                 const target = crashPool[Math.floor(Math.random() * crashPool.length)];
                 let currentM = 1.00;
+                
                 const flyInterval = setInterval(() => {
                     currentM += 0.01;
                     if (currentM >= target) {
                         clearInterval(flyInterval);
-                        update(gameRef, { status: "crashed", multiplier: currentM });
-                        setTimeout(() => update(gameRef, { status: "idle" }), 4000);
+                        update(gameRef, { status: "crashed", multiplier: currentM, nextIn: 15 });
+                        setTimeout(() => update(gameRef, { status: "idle" }), 1000);
                     } else {
-                        update(gameRef, { status: "flying", multiplier: currentM });
+                        update(gameRef, { status: "flying", multiplier: currentM, nextIn: 0 });
                     }
                 }, 70);
             })();
