@@ -31,34 +31,22 @@ let userState = "idle";
 let gameLoop;
 let localStatus = "";
 let isAdWatching = false;
-let isProcessing = false; // ASOSIY QULF
+let isProcessing = false;
+let localHistory = []; // Faqat lokal tarix uchun
 
 // 1. Balans
 onValue(ref(db, `users/${userId}`), (snap) => {
     if (snap.exists()) balanceDisplay.innerText = snap.val().balance.toLocaleString();
 });
 
-// 2. Tarixni chiqarishda duplikatsiyaga qarshi
-onValue(ref(db, 'crash_history'), (snap) => {
-    if (snap.exists()) {
-        historyBar.innerHTML = "";
-        const data = Object.values(snap.val()).reverse().slice(0, 10);
-        data.forEach(val => {
-            const div = document.createElement('div');
-            div.className = `hist-item ${val >= 2 ? 'hist-high' : 'hist-low'}`;
-            div.innerText = parseFloat(val).toFixed(2) + "x";
-            historyBar.appendChild(div);
-        });
-    }
-});
-
-// 3. O'yin mantiqi
+// 2. O'yin mantiqi
 onValue(ref(db, 'current_game'), (snapshot) => {
     const data = snapshot.val();
     
     if (!data) { 
         isProcessing = false;
-        checkQueue(); 
+        // 2 soniyadan keyin yangi o'yin bormi tekshirish
+        setTimeout(checkQueue, 2000);
         return; 
     }
 
@@ -89,7 +77,6 @@ onValue(ref(db, 'current_game'), (snapshot) => {
                 updateUI('flying', currentX);
                 gameLoop = requestAnimationFrame(updateTick);
             } else {
-                // AGAR ALLAQACHON ISHLANAYOTGAN BO'LSA TO'XTATISH
                 if (!isProcessing) {
                     isProcessing = true;
                     handleCrash(data);
@@ -101,12 +88,16 @@ onValue(ref(db, 'current_game'), (snapshot) => {
 });
 
 async function checkQueue() {
+    if (isProcessing) return;
     const qSnap = await get(ref(db, 'queue'));
     if (qSnap.exists()) {
         const keys = Object.keys(qSnap.val());
         const first = qSnap.val()[keys[0]];
+        // Faqat bitta brauzer o'yinni boshlay olishi uchun runTransaction
         await runTransaction(ref(db, 'current_game'), (curr) => {
-            if (curr === null) return { status: 'waiting', targetX: first.x, id: keys[0], startTime: Date.now() };
+            if (curr === null) {
+                return { status: 'waiting', targetX: first.x, id: keys[0], startTime: Date.now() };
+            }
         });
     }
 }
@@ -126,20 +117,31 @@ async function handleCrash(data) {
     multDisplay.classList.add('crashed');
     userState = "idle";
     
-    // 1. Tarixga yozish
-    await push(ref(db, 'crash_history'), data.targetX);
+    // Lokal tarixga qo'shish (BAZAGA YOZILMAYDI)
+    updateLocalHistory(data.targetX);
     
-    // 2. Navbatdan o'chirish va joriy o'yinni tozalash (BITTA AMALDA)
+    // O'yinni tozalash
     setTimeout(async () => {
         const updates = {};
         updates['current_game'] = null;
         updates[`queue/${data.id}`] = null;
         await update(ref(db), updates);
-        isProcessing = false; // Keyingi o'yin uchun qulfni ochish
     }, 2000);
 }
 
-// Tugmalar mantiqi
+function updateLocalHistory(val) {
+    localHistory.unshift(val);
+    if (localHistory.length > 10) localHistory.pop();
+    
+    historyBar.innerHTML = "";
+    localHistory.forEach(x => {
+        const div = document.createElement('div');
+        div.className = `hist-item ${x >= 2 ? 'hist-high' : 'hist-low'}`;
+        div.innerText = parseFloat(x).toFixed(2) + "x";
+        historyBar.appendChild(div);
+    });
+}
+
 actionBtn.onclick = async () => {
     if (localStatus === "waiting" && userState === "idle") {
         isAdWatching = true;
