@@ -15,6 +15,7 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const tg = window.Telegram.WebApp;
 
+// Adsgram
 const AdController = window.Adsgram.init({ blockId: "int-20566" });
 
 const user = tg.initDataUnsafe?.user || { id: "test_user", first_name: "Mehmon", username: "guest" };
@@ -35,9 +36,8 @@ let currentBalance = 0;
 let userState = "idle"; 
 let gameLoop;
 let localStatus = "";
-let lastProcessedGameId = ""; 
 let isAdWatching = false;
-let isCheckingQueue = false; // Takrorlanishni oldini olish uchun
+let lastGameProcessed = ""; // Takrorlanishni oldini olish uchun ID
 
 // 1. Balansni yuklash
 onValue(ref(db, `users/${userId}`), (snap) => {
@@ -47,7 +47,7 @@ onValue(ref(db, `users/${userId}`), (snap) => {
     }
 });
 
-// 2. Tarixni yuklash (Takrorlanishsiz)
+// 2. Tarixni yuklash
 onValue(ref(db, 'crash_history'), (snap) => {
     if (snap.exists()) {
         historyBar.innerHTML = "";
@@ -65,7 +65,7 @@ onValue(ref(db, 'crash_history'), (snap) => {
 onValue(ref(db, 'current_game'), (snapshot) => {
     const data = snapshot.val();
     if (!data) { 
-        if (!isCheckingQueue) checkQueue(); 
+        checkQueue(); 
         return; 
     }
 
@@ -97,8 +97,8 @@ onValue(ref(db, 'current_game'), (snapshot) => {
                 updateUI('flying', currentX);
                 gameLoop = requestAnimationFrame(updateTick);
             } else {
-                if (lastProcessedGameId !== data.id) {
-                    lastProcessedGameId = data.id;
+                if (lastGameProcessed !== data.id) {
+                    lastGameProcessed = data.id;
                     handleCrash(data);
                 }
             }
@@ -107,27 +107,58 @@ onValue(ref(db, 'current_game'), (snapshot) => {
     gameLoop = requestAnimationFrame(updateTick);
 });
 
+// Tugma bosilganda (Join yoki Cashout)
+actionBtn.onclick = async () => {
+    if (actionBtn.className.includes("btn-join") && localStatus === "waiting") {
+        isAdWatching = true;
+        userState = "joined";
+        try {
+            await AdController.show();
+            isAdWatching = false;
+            infoText.innerText = "Siz o'yinga qo'shildingiz!";
+            updateUI('waiting');
+        } catch (e) {
+            isAdWatching = false;
+            userState = "idle";
+            tg.showAlert("Reklamani oxirigacha ko'rmadingiz!");
+        }
+    } 
+    else if (userState === "playing" && actionBtn.className.includes("btn-cashout")) {
+        const xValue = parseFloat(multDisplay.innerText);
+        const win = Math.floor(xValue * 1.5);
+        userState = "idle";
+        actionBtn.disabled = true;
+
+        try {
+            const userRef = ref(db, `users/${userId}`);
+            const snap = await get(userRef);
+            const userData = snap.val();
+            
+            await update(userRef, { 
+                balance: (userData.balance || 0) + win,
+                totalEarned: (userData.totalEarned || 0) + win,
+                winCount: (userData.winCount || 0) + 1
+            });
+
+            await push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
+            infoText.innerText = `+${win} so'm yutdingiz!`;
+        } catch (err) { console.error(err); }
+    }
+};
+
 async function checkQueue() {
-    isCheckingQueue = true;
     const qSnap = await get(ref(db, 'queue'));
     if (qSnap.exists()) {
         const queueData = qSnap.val();
         const keys = Object.keys(queueData);
         const nextId = keys[0];
-        const nextX = queueData[nextId].x;
 
         await runTransaction(ref(db, 'current_game'), (curr) => {
             if (curr === null) {
-                return { 
-                    status: 'waiting', 
-                    targetX: nextX, 
-                    id: nextId, 
-                    startTime: Date.now() 
-                };
+                return { status: 'waiting', targetX: queueData[nextId].x, id: nextId, startTime: Date.now() };
             }
         });
     }
-    isCheckingQueue = false;
 }
 
 function startFlight(data) {
@@ -145,34 +176,31 @@ function handleCrash(data) {
     multDisplay.classList.add('crashed');
     userState = "idle";
     
-    // Tarixga faqat bir marta yozish
+    // Tarixga va navbatni tozalashga faqat bir marta murojaat
     push(ref(db, 'crash_history'), data.targetX);
     
-    setTimeout(() => { resetToNext(data); }, 1000);
-}
-
-async function resetToNext(data) {
-    const updates = {};
-    updates['current_game'] = null;
-    // O'yin tugagach uni navbatdan olib tashlash (takrorlanmasligi uchun)
-    updates[`queue/${data.id}`] = null; 
-    
-    await update(ref(db), updates);
+    setTimeout(async () => {
+        const updates = {};
+        updates['current_game'] = null;
+        updates[`queue/${data.id}`] = null; // Navbatdan o'chirish (Takrorlanmasligi uchun)
+        await update(ref(db), updates);
+    }, 1000);
 }
 
 function updateUI(status, x = 1) {
     if (status === 'waiting') {
-        actionBtn.innerText = (userState === "joined") ? "KUTILMOQDA..." : "O'yinga qo'shilish";
+        actionBtn.disabled = (userState === "joined" || isAdWatching);
+        actionBtn.innerText = (userState === "joined") ? "O'YINGA KIRILDI" : "O'YINGA QO'SHILISH";
         actionBtn.className = (userState === "joined") ? "btn-joined" : "btn-join";
-        actionBtn.disabled = (userState === "joined");
-    } else if (status === 'flying' && userState === "playing") {
-        actionBtn.disabled = false;
-        actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x * 1.5)} so'm`;
-        actionBtn.className = "btn-cashout";
-    } else {
-        actionBtn.innerText = "Kutilmoqda...";
-        actionBtn.disabled = true;
+    } else if (status === 'flying') {
+        if (userState === "playing") {
+            actionBtn.disabled = false;
+            actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x * 1.5)} so'm`;
+            actionBtn.className = "btn-cashout";
+        } else {
+            actionBtn.disabled = true;
+            actionBtn.innerText = "PARVOZ DAVOM ETMOQDA...";
+            actionBtn.className = "btn-joined";
+        }
     }
 }
-
-// Qolgan onclick mantiqlari o'zgarishsiz qoladi...
