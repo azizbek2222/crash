@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, onValue, set, update, push, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { getDatabase, ref, onValue, set, update, push } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyBt_YoPMKJlEL7RAGwWNx6uPJpoOHaQ2iY",
@@ -36,22 +36,23 @@ let myBalance = 0;
 let isJoined = false;
 let isWaitingForNext = false;
 let currentGameState = "idle";
-const crashPool = [1.1, 2.5, 1.2, 5.0, 1.8, 1.05, 1.15, 3.2, 1.5, 2.0];
+const crashPool = [1.1, 2.5, 1.2, 5.0, 1.8, 1.05, 15.0, 3.2, 1.5, 2.0];
 
 const userRef = ref(db, 'users/' + tgId);
 const gameRef = ref(db, 'live_game');
 const historyRef = ref(db, 'current_round_history');
 
-// Balansni kuzatish
+// Foydalanuvchi ma'lumotlarini yuklash
 onValue(userRef, (snapshot) => {
     myBalance = snapshot.val()?.balance || 0;
     balanceEl.innerText = Math.floor(myBalance);
 });
 
-// O'yin holatini real vaqtda kuzatish
+// O'YIN HOLATINI KUZATISH (Client)
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
+    
     currentGameState = data.status;
     const m = data.multiplier || 1.00;
 
@@ -78,6 +79,8 @@ onValue(gameRef, (snapshot) => {
         if (data.nextIn > 0) {
             nextRoundTimer.style.display = "block";
             timerSec.innerText = data.nextIn;
+        } else {
+            nextRoundTimer.style.display = "none";
         }
 
         if (isJoined) {
@@ -98,10 +101,10 @@ onValue(gameRef, (snapshot) => {
     }
 });
 
-// Reklama va Qo'shilish
+// Qo'shilish (Reklama bilan)
 joinBtn.onclick = async () => {
     joinBtn.disabled = true;
-    joinBtn.innerText = "Reklama yuklanmoqda...";
+    joinBtn.innerText = "Yuklanmoqda...";
     try {
         const result = await AdController.show();
         if (result && result.done) {
@@ -125,7 +128,7 @@ joinBtn.onclick = async () => {
     }
 };
 
-// Pulni olish
+// Cashout
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
         const m = parseFloat(multiplierDisplay.innerText);
@@ -133,6 +136,7 @@ cashoutBtn.onclick = () => {
         myBalance += win;
         update(userRef, { balance: myBalance });
         push(historyRef, { uid: tgId, coeff: m.toFixed(2), amount: win });
+        
         isJoined = false;
         joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         joinBtn.className = "";
@@ -142,42 +146,54 @@ cashoutBtn.onclick = () => {
     }
 };
 
-// SERVER LOGIKASI (Faqat bitta master yaratish uchun mantiq)
+// O'YIN TSIZKLI (Server Loop)
+let loopStarted = false;
 function startMasterLoop() {
+    if (loopStarted) return;
+    loopStarted = true;
+
     setInterval(async () => {
-        // Faqat holat 'idle' bo'lsa yoki ma'lumot bo'lmasa yangi raund boshlash
-        if (currentGameState === "idle" || currentGameState === undefined) {
+        // Faqat o'yin bo'sh turganda yangi raund boshlash
+        if (currentGameState === "idle" || !currentGameState) {
+            // 1. Tozalash
             await set(historyRef, null);
-            
-            // 1) 15 soniya kutish
+
+            // 2. 15 soniya orqaga sanash
             for (let i = 15; i >= 0; i--) {
-                await update(gameRef, { status: "crashed", nextIn: i });
+                await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            // 2) Uchish
+            // 3. Uchishni boshlash
             const target = crashPool[Math.floor(Math.random() * crashPool.length)];
             let currentM = 1.00;
+            
+            // Holatni "flying"ga o'tkazish
             await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
 
             const flyInterval = setInterval(async () => {
                 currentM += 0.01;
                 if (currentM >= target) {
                     clearInterval(flyInterval);
+                    // Portlash
                     await update(gameRef, { status: "crashed", multiplier: currentM, nextIn: 15 });
-                    setTimeout(() => update(gameRef, { status: "idle" }), 2000);
+                    // 2 soniyadan keyin "idle" holatga qaytish (Loop qaytadan boshlanishi uchun)
+                    setTimeout(() => {
+                        update(gameRef, { status: "idle" });
+                    }, 2000);
                 } else {
+                    // Faqat multiplierni yangilash
                     update(gameRef, { multiplier: currentM });
                 }
-            }, 80);
+            }, 80); // Uchish tezligi
         }
     }, 2000);
 }
 
-// Master Loop-ni ishga tushirish
+// Loopni ishga tushirish
 startMasterLoop();
 
-// Tarixni yangilash
+// Yutuqlar ro'yxati
 onValue(historyRef, (snapshot) => {
     const data = snapshot.val();
     historyList.innerHTML = "";
