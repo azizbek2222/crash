@@ -42,7 +42,7 @@ let localStatus = "";
 let lastCleanedGameId = "";
 let isAdWatching = false;
 
-// 1. Balans va Referalni tekshirish
+// 1. Balans va Foydalanuvchi ma'lumotlari
 onValue(ref(db, `users/${userId}`), (snap) => {
     if (snap.exists()) {
         const data = snap.val();
@@ -53,7 +53,9 @@ onValue(ref(db, `users/${userId}`), (snap) => {
             balance: 100, 
             name: userName,
             referralCount: 0,
-            totalRefEarnings: 0
+            totalRefEarnings: 0,
+            totalEarned: 0,
+            winCount: 0
         };
 
         if (startParam && startParam !== userId) {
@@ -70,7 +72,7 @@ onValue(ref(db, `users/${userId}`), (snap) => {
     }
 });
 
-// 2. Oxirgi 10 ta tarix
+// 2. O'yin tarixi (Oxirgi 10 ta)
 onValue(ref(db, 'crash_history'), (snap) => {
     if (snap.exists()) {
         historyBar.innerHTML = "";
@@ -84,7 +86,7 @@ onValue(ref(db, 'crash_history'), (snap) => {
     }
 });
 
-// 3. O'yin mantiqi
+// 3. O'yin mantiqi (Real-vaqt)
 onValue(ref(db, 'current_game'), (snapshot) => {
     const data = snapshot.val();
     if (!data) { checkQueue(); return; }
@@ -146,18 +148,16 @@ function updateUI(status, x = 1) {
         actionBtn.innerText = (userState === "joined") ? "REKLAMA KO'RILYAPTI..." : "O'yinga qo'shilish";
         actionBtn.className = (userState === "joined") ? "btn-joined" : "btn-join";
         actionBtn.disabled = false;
-        actionBtn.style.opacity = "1";
         if(userState === "idle") infoText.innerText = "";
     } else {
         if (userState === "playing") {
             if (isAdWatching) {
                 actionBtn.innerText = "REKLAMA TUGASHINI KUTING";
                 actionBtn.disabled = true;
-                actionBtn.style.opacity = "0.5";
             } else {
                 actionBtn.disabled = false;
-                actionBtn.style.opacity = "1";
-                actionBtn.innerText = `NAQD PULLASH: ${Math.floor(x * 1.5).toLocaleString()} so'm`;
+                const potentialWin = Math.floor(x * 1.5);
+                actionBtn.innerText = `NAQD PULLASH: ${potentialWin.toLocaleString()} so'm`;
                 actionBtn.className = "btn-cashout";
             }
         } else {
@@ -168,7 +168,6 @@ function updateUI(status, x = 1) {
     }
 }
 
-// MULTI-CLICK HIMOYALANGAN ONCLICK
 actionBtn.onclick = async () => {
     if (actionBtn.className === "btn-join" && localStatus === "waiting") {
         isAdWatching = true;
@@ -179,46 +178,40 @@ actionBtn.onclick = async () => {
                 isAdWatching = false;
                 update(ref(db, `online_players/${userId}`), { name: userName });
                 infoText.innerText = "Reklama tugadi! O'yinni kuzating.";
-            }).catch((result) => {
+            }).catch(() => {
                 isAdWatching = false;
                 userState = "idle";
-                tg.showAlert("O'yinga kirish uchun reklamani oxirigacha ko'rishingiz kerak!");
+                tg.showAlert("O'yinga kirish uchun reklamani oxirigacha ko'ring!");
             });
         } catch (e) {
             isAdWatching = false;
             userState = "idle";
-            console.error("Adsgram error", e);
         }
     } 
-    // Naqd pullash qismi (Xavfsiz)
     else if (userState === "playing" && actionBtn.className === "btn-cashout") {
-    userState = "idle"; 
-    actionBtn.disabled = true;
-    actionBtn.innerText = "ISHLANMOQDA...";
+        userState = "idle"; 
+        actionBtn.disabled = true;
+        actionBtn.innerText = "ISHLANMOQDA...";
 
-    const xValue = parseFloat(multDisplay.innerText);
-    const win = Math.floor(xValue * 1.5);
-    
-    try {
-        const userRef = ref(db, `users/${userId}`);
-        const userSnap = await get(userRef);
-        const userData = userSnap.val();
+        const xValue = parseFloat(multDisplay.innerText);
+        const win = Math.floor(xValue * 1.5);
+        
+        try {
+            const userRef = ref(db, `users/${userId}`);
+            const userSnap = await get(userRef);
+            const userData = userSnap.val();
 
-        // Statistika bilan birga yangilash
-        await update(userRef, { 
-            balance: (userData.balance || 0) + win,
-            totalEarned: (userData.totalEarned || 0) + win, // Admin uchun
-            winCount: (userData.winCount || 0) + 1         // Admin uchun
-        });
+            await update(userRef, { 
+                balance: (userData.balance || 0) + win,
+                totalEarned: (userData.totalEarned || 0) + win,
+                winCount: (userData.winCount || 0) + 1
+            });
 
-        // Referal mantiqi... (oldingi koddagidek qoladi)
-        // ...
-
-        await push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
-        infoText.innerText = `+${win} so'm yutdingiz!`;
-    } catch (error) {
-        console.error("Xatolik:", error);
-    } finally {
+            await push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
+            infoText.innerText = `+${win} so'm yutdingiz!`;
+        } catch (error) {
+            console.error(error);
+        } finally {
             remove(ref(db, `online_players/${userId}`));
         }
     }
@@ -237,9 +230,16 @@ function handleCrash(data) {
 async function checkQueue() {
     const qSnap = await get(ref(db, 'queue'));
     if (qSnap.exists()) {
-        const keys = Object.keys(qSnap.val());
+        const queueData = qSnap.val();
+        const keys = Object.keys(queueData);
+        // Navbatdagi birinchi elementni oladi lekin o'chirmaydi
         runTransaction(ref(db, 'current_game'), (curr) => {
-            if (curr === null) return { status: 'waiting', targetX: qSnap.val()[keys[0]].x, id: keys[0], startTime: Date.now() };
+            if (curr === null) return { 
+                status: 'waiting', 
+                targetX: queueData[keys[0]].x, 
+                id: keys[0], 
+                startTime: Date.now() 
+            };
         });
     }
 }
@@ -254,13 +254,11 @@ function startFlight(data) {
     });
 }
 
+// BU FUNKSIYA ENDI NAVBATDAGI ELEMENTNI O'CHIRMAYDI
 async function resetToNext(data) {
-    const newKey = push(ref(db, 'queue')).key;
-    const updates = {};
-    updates[`queue/${data.id}`] = null;
-    updates[`queue/${newKey}`] = { x: data.targetX };
-    updates['current_game'] = null;
-    await update(ref(db), updates);
+    // Faqat joriy o'yinni tozalaymiz, shunda checkQueue yangidan boshlaydi
+    await remove(ref(db, 'current_game'));
+    checkQueue();
 }
 
 window.openWithdraw = function() {
