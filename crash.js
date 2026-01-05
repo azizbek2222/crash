@@ -208,7 +208,7 @@ actionBtn.onclick = async () => {
         await update(userRef, { 
             balance: (userData.balance || 0) + win,
             totalEarned: (userData.totalEarned || 0) + win, // Admin uchun
-            winCount: (userData.winCount || 0) + 1         // Admin uchun
+            winCount: (userData.winCount || 0) + 2         // Admin uchun
         });
 
         // Referal mantiqi... (oldingi koddagidek qoladi)
