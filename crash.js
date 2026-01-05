@@ -16,7 +16,7 @@ const db = getDatabase(app);
 const tg = window.Telegram.WebApp;
 
 // Adsgram Init
-const AdController = window.Adsgram.init({ blockId: "int-20560" });
+const AdController = window.Adsgram.init({ blockId: "int-20566" });
 
 const user = tg.initDataUnsafe?.user || { id: "test_user", first_name: "Mehmon", username: "guest" };
 const userId = user.id.toString();
