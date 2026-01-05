@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, onValue, set, get, update, remove, push, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { getDatabase, ref, onValue, set, get, update, remove, push, runTransaction, onDisconnect } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyBt_YoPMKJlEL7RAGwWNx6uPJpoOHaQ2iY",
@@ -14,11 +14,14 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const tg = window.Telegram.WebApp;
-const AdController = window.Adsgram.init({ blockId: "int-20566" });
+tg.expand();
 
-const user = tg.initDataUnsafe?.user || { id: "test_user", first_name: "Mehmon" };
-const userId = user.id.toString();
-const userName = user.username || user.first_name;
+// Foydalanuvchi ma'lumotlari
+const userData = tg.initDataUnsafe?.user;
+const userId = userData?.id ? userData.id.toString() : "test_" + Math.floor(Math.random() * 1000);
+const userName = userData?.username ? "@" + userData.username : (userData?.first_name || "Mehmon");
+
+document.getElementById('userDisplay').innerText = userName;
 
 const multDisplay = document.getElementById('multiplier');
 const timerDisplay = document.getElementById('timer');
@@ -26,27 +29,40 @@ const balanceDisplay = document.getElementById('balanceDisplay');
 const actionBtn = document.getElementById('actionBtn');
 const historyBar = document.getElementById('gameHistory');
 const infoText = document.getElementById('infoText');
+const playerCountEl = document.getElementById('playerCount');
 
-let userState = "idle"; 
+let userState = "idle"; // idle, joined, playing
 let gameLoop;
 let localStatus = "";
 let isAdWatching = false;
 let isProcessing = false;
-let localHistory = []; // Faqat lokal tarix uchun
+let localHistory = [];
 
-// 1. Balans
-onValue(ref(db, `users/${userId}`), (snap) => {
-    if (snap.exists()) balanceDisplay.innerText = snap.val().balance.toLocaleString();
+// Online o'yinchilar
+const onlineRef = ref(db, `online_players/${userId}`);
+set(onlineRef, { name: userName });
+onDisconnect(onlineRef).remove();
+
+onValue(ref(db, 'online_players'), (snap) => {
+    playerCountEl.innerText = snap.exists() ? Object.keys(snap.val()).length : 0;
 });
 
-// 2. O'yin mantiqi
+// Balans (Faqat ko'rsatish, 5000 so'm berish olib tashlandi)
+onValue(ref(db, `users/${userId}/balance`), (snap) => {
+    balanceDisplay.innerText = snap.exists() ? snap.val().toLocaleString() : "0";
+});
+
+// O'yin mantiqi
 onValue(ref(db, 'current_game'), (snapshot) => {
     const data = snapshot.val();
     
     if (!data) { 
         isProcessing = false;
-        // 2 soniyadan keyin yangi o'yin bormi tekshirish
-        setTimeout(checkQueue, 2000);
+        if (userState === "joined" || userState === "playing") userState = "idle";
+        multDisplay.innerText = "1.00x";
+        multDisplay.classList.remove('crashed');
+        timerDisplay.innerText = "SAYLOV...";
+        setTimeout(checkQueue, 1500);
         return; 
     }
 
@@ -59,8 +75,7 @@ onValue(ref(db, 'current_game'), (snapshot) => {
             const diff = Math.ceil((data.startTime + 10000 - now) / 1000);
             if (diff > 0) {
                 multDisplay.innerText = "1.00x";
-                multDisplay.classList.remove('crashed');
-                timerDisplay.innerText = diff;
+                timerDisplay.innerText = diff + "s";
                 updateUI('waiting');
                 gameLoop = requestAnimationFrame(updateTick);
             } else {
@@ -74,6 +89,8 @@ onValue(ref(db, 'current_game'), (snapshot) => {
 
             if (currentX < data.targetX) {
                 multDisplay.innerText = currentX.toFixed(2) + "x";
+                // Agar foydalanuvchi joined bo'lsa, uni o'yinga kiritish
+                if (userState === "joined") userState = "playing";
                 updateUI('flying', currentX);
                 gameLoop = requestAnimationFrame(updateTick);
             } else {
@@ -93,11 +110,8 @@ async function checkQueue() {
     if (qSnap.exists()) {
         const keys = Object.keys(qSnap.val());
         const first = qSnap.val()[keys[0]];
-        // Faqat bitta brauzer o'yinni boshlay olishi uchun runTransaction
         await runTransaction(ref(db, 'current_game'), (curr) => {
-            if (curr === null) {
-                return { status: 'waiting', targetX: first.x, id: keys[0], startTime: Date.now() };
-            }
+            if (curr === null) return { status: 'waiting', targetX: first.x, id: keys[0], startTime: Date.now() };
         });
     }
 }
@@ -115,64 +129,68 @@ function startFlight(data) {
 async function handleCrash(data) {
     multDisplay.innerText = data.targetX.toFixed(2) + "x";
     multDisplay.classList.add('crashed');
+    infoText.innerText = userState === "playing" ? "Crash!" : "";
     userState = "idle";
     
-    // Lokal tarixga qo'shish (BAZAGA YOZILMAYDI)
     updateLocalHistory(data.targetX);
     
-    // O'yinni tozalash
     setTimeout(async () => {
         const updates = {};
         updates['current_game'] = null;
         updates[`queue/${data.id}`] = null;
         await update(ref(db), updates);
-    }, 2000);
+    }, 2500);
 }
 
 function updateLocalHistory(val) {
     localHistory.unshift(val);
     if (localHistory.length > 10) localHistory.pop();
-    
     historyBar.innerHTML = "";
     localHistory.forEach(x => {
         const div = document.createElement('div');
         div.className = `hist-item ${x >= 2 ? 'hist-high' : 'hist-low'}`;
-        div.innerText = parseFloat(x).toFixed(2) + "x";
+        div.innerText = x.toFixed(2) + "x";
         historyBar.appendChild(div);
     });
 }
 
+// ASOSIY TUGMA ISHLASH MANTIQI
 actionBtn.onclick = async () => {
-    if (localStatus === "waiting" && userState === "idle") {
+    if (localStatus === "waiting" && userState === "idle" && !isAdWatching) {
         isAdWatching = true;
-        try {
-            await AdController.show();
+        const AdController = window.Adsgram.init({ blockId: "int-20566" });
+        AdController.show().then(() => {
             userState = "joined";
-            infoText.innerText = "Qo'shildingiz!";
+            infoText.innerText = "Siz navbatdasiz!";
             updateUI('waiting');
-        } catch (e) {
-            tg.showAlert("Reklama ko'rilmadi!");
-        } finally { isAdWatching = false; }
-    } else if (localStatus === "flying" && userState === "playing") {
+        }).catch(() => {
+            tg.showAlert("Reklamani ko'rmasangiz o'yinga kirmaysiz!");
+        }).finally(() => { isAdWatching = false; });
+    } 
+    else if (localStatus === "flying" && userState === "playing") {
         const xValue = parseFloat(multDisplay.innerText);
-        const win = Math.floor(xValue * 1.5);
-        userState = "idle";
+        const win = Math.floor(xValue * 500); // 500 so'm tikilgan deb hisoblash
+        userState = "idle"; 
+        
         const userRef = ref(db, `users/${userId}`);
         const snap = await get(userRef);
-        await update(userRef, { balance: (snap.val().balance || 0) + win });
+        const currentBal = snap.exists() ? (snap.val().balance || 0) : 0;
+        
+        await update(userRef, { balance: currentBal + win });
         push(ref(db, 'round_winners'), { user: userName, x: xValue.toFixed(2), win: win });
         infoText.innerText = `+${win} so'm!`;
+        updateUI('flying');
     }
 };
 
 function updateUI(status, x = 1) {
     if (status === 'waiting') {
-        actionBtn.disabled = (userState === "joined" || isAdWatching);
+        actionBtn.disabled = (userState === "joined");
         actionBtn.innerText = (userState === "joined") ? "TAYYOR" : "QO'SHILISH";
     } else if (status === 'flying') {
         if (userState === "playing") {
             actionBtn.disabled = false;
-            actionBtn.innerText = `NAQD: ${Math.floor(x * 1.5)}`;
+            actionBtn.innerText = `YUTUQ: ${Math.floor(x * 500)}`;
         } else {
             actionBtn.disabled = true;
             actionBtn.innerText = "KUTING...";
