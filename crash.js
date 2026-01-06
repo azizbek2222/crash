@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getDatabase, ref, onValue, set, update, push } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
+// 1. Firebase Konfiguratsiyasi
 const firebaseConfig = {
     apiKey: "AIzaSyBt_YoPMKJlEL7RAGwWNx6uPJpoOHaQ2iY",
     authDomain: "game-49172.firebaseapp.com",
@@ -15,6 +16,7 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const AdController = window.Adsgram.init({ blockId: "int-20566" });
 
+// 2. Telegram WebApp Ma'lumotlari
 const tg = window.Telegram.WebApp;
 tg.expand();
 const user = tg.initDataUnsafe?.user || { id: "12345678", first_name: "Guest" };
@@ -33,6 +35,7 @@ const historyList = document.getElementById('history-list');
 document.getElementById('user-name').innerText = user.first_name;
 document.getElementById('user-id').innerText = "ID: " + tgId;
 
+// O'yin sozlamalari
 const crashPool = [1.1, 1.5, 2.0, 1.2, 5.0, 1.8, 3.5, 1.3, 10.0, 1.4, 2.8, 4.2, 1.5, 7.5];
 let myBalance = 0;
 let isJoined = false;           // Hozirgi raundda qatnashyaptimi?
@@ -43,21 +46,27 @@ const userRef = ref(db, 'users/' + tgId);
 const gameRef = ref(db, 'live_game');
 const historyRef = ref(db, 'history');
 
-// Balansni yuklash (Bazadan 0 bo'lsa 5000 beradi, xohlasangiz 0 qiling)
+// 3. Balansni kuzatish
 onValue(userRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
         myBalance = data.balance || 0;
         balanceEl.innerText = Math.floor(myBalance);
     } else {
+        // Yangi foydalanuvchi bo'lsa 5000 so'm bonus
         set(userRef, { balance: 5000, name: user.first_name });
     }
 });
 
-// O'yin holatini kuzatish
+// 4. O'yin holatini real-vaqtda kuzatish (UI ni yangilash)
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
-    if (!data) return;
+    
+    // Agar baza bo'sh bo'lsa, qotib qolmasligi uchun default holat
+    if (!data) {
+        currentGameState = "idle";
+        return;
+    }
 
     currentGameState = data.status;
     const m = data.multiplier || 1.00;
@@ -68,16 +77,15 @@ onValue(gameRef, (snapshot) => {
         crashMsg.style.display = "none";
         nextRoundTimer.style.display = "none";
 
-        // Agar foydalanuvchi raund boshida (crashed holatida) qo'shilgan bo'lsa
         if (isJoined) {
             joinBtn.disabled = true;
             joinBtn.innerText = "O'YINDASIZ";
-            joinBtn.classList.add('playing');
+            joinBtn.className = "playing"; // CSS class
             cashoutBtn.disabled = false;
         } else if (isWaitingForNext) {
             joinBtn.disabled = true;
             joinBtn.innerText = "NAVBTADAGI RAUNDNI KUTING...";
-            joinBtn.classList.add('waiting');
+            joinBtn.className = "waiting";
         }
     } 
     else if (currentGameState === "crashed") {
@@ -91,52 +99,53 @@ onValue(gameRef, (snapshot) => {
             timerSec.innerText = data.nextIn;
         }
 
-        // MUHIM: Portlagan paytda navbatda turganlarni avtomatik o'yinga qo'shish
+        // NAVBAT TIZIMI: Taymer boshlanganda navbatdagilarni o'yinga qo'shish
         if (isWaitingForNext) {
             isJoined = true;
             isWaitingForNext = false;
-        } else {
-            // Agar navbatda bo'lmasa va o'yindan chiqqan bo'lsa
-            isJoined = false;
+        } else if (!isJoined) {
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
-            joinBtn.classList.remove('playing', 'waiting');
+            joinBtn.className = "";
         }
     }
 });
 
-// Reklama ko'rish va navbatga turish
+// 5. Reklama tugmasi bosilganda
 joinBtn.onclick = async () => {
+    if (isJoined || isWaitingForNext) return;
+
     joinBtn.disabled = true;
-    joinBtn.innerText = "Reklama yuklanmoqda...";
+    joinBtn.innerText = "REKLAMA YUKLANMOQDA...";
 
     try {
         const result = await AdController.show();
         if (result && result.done) {
-            // Reklama muvaffaqiyatli ko'rildi
+            tg.HapticFeedback.impactOccurred('medium');
+            
             if (currentGameState === "crashed") {
-                // Agar o'yin to'xtab turgan bo'lsa, darrov kiradi
+                // Agar portlab bo'lgan bo'lsa, darrov qo'shiladi
                 isJoined = true;
                 joinBtn.innerText = "O'YINDASIZ (Kuting)";
-                joinBtn.classList.add('playing');
+                joinBtn.className = "playing";
             } else {
-                // Agar o'yin uchayotgan bo'lsa, navbatga qo'yiladi
+                // Agar uchayotgan bo'lsa, navbatga qo'yiladi
                 isWaitingForNext = true;
-                joinBtn.innerText = "NAVBTADA... (Keyingi raund)";
-                joinBtn.classList.add('waiting');
+                joinBtn.innerText = "NAVBTADA...";
+                joinBtn.className = "waiting";
             }
-            tg.HapticFeedback.impactOccurred('medium');
         } else {
+            // Reklama oxirigacha ko'rilmasa
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         }
     } catch (e) {
         joinBtn.disabled = false;
-        joinBtn.innerText = "Xatolik! Qaytadan urinish";
+        joinBtn.innerText = "XATOLIK! QAYTA URINING";
     }
 };
 
-// Pulni olish
+// 6. Cashout (Pulni olish)
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
         const currentM = parseFloat(multiplierDisplay.innerText);
@@ -145,26 +154,37 @@ cashoutBtn.onclick = () => {
         myBalance += win;
         update(userRef, { balance: myBalance });
         
-        push(historyRef, { uid: tgId, coeff: currentM.toFixed(2), amount: win });
+        // Tarixga yozish
+        push(historyRef, { 
+            uid: tgId, 
+            name: user.first_name, 
+            coeff: currentM.toFixed(2), 
+            amount: win 
+        });
 
-        isJoined = false; // O'yindan chiqdi
+        isJoined = false;
         cashoutBtn.disabled = true;
         joinBtn.disabled = false;
         joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
-        joinBtn.classList.remove('playing', 'waiting');
+        joinBtn.className = "";
         tg.HapticFeedback.notificationOccurred('success');
     }
 };
 
-// MASTER LOOP (Server mantiqi)
+// 7. MASTER SERVER LOOP (O'yinni boshqaruvchi qism)
 function startMasterLoop() {
     setInterval(async () => {
+        // Agar status bo'sh bo'lsa yoki "idle" bo'lsa yangi o'yin boshlash
         if (currentGameState === "idle" || !currentGameState) {
+            
+            // 15 soniya kutish rejimi
             for (let i = 15; i >= 0; i--) {
-                await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
+                await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i })
+                    .catch(() => set(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i }));
                 await new Promise(r => setTimeout(r, 1000));
             }
 
+            // Uchishni boshlash
             const target = crashPool[Math.floor(Math.random() * crashPool.length)];
             let curr = 1.00;
             await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
@@ -173,8 +193,12 @@ function startMasterLoop() {
                 curr += 0.01;
                 if (curr >= target) {
                     clearInterval(flyInterval);
+                    // Portladi
                     await update(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
-                    setTimeout(() => update(gameRef, { status: "idle" }), 2000);
+                    // Loopni qaytadan boshlatish uchun statusni 2 soniyadan keyin idle qilish
+                    setTimeout(() => {
+                        update(gameRef, { status: "idle" });
+                    }, 2000);
                 } else {
                     update(gameRef, { multiplier: curr });
                 }
@@ -183,9 +207,10 @@ function startMasterLoop() {
     }, 2000);
 }
 
+// Master loopni ishga tushirish
 startMasterLoop();
 
-// Tarix
+// 8. Tarixni yuklash (UI)
 onValue(historyRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
