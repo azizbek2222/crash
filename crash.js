@@ -1,7 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getDatabase, ref, onValue, set, update, push } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-// 1. Firebase Konfiguratsiyasi
 const firebaseConfig = {
     apiKey: "AIzaSyBt_YoPMKJlEL7RAGwWNx6uPJpoOHaQ2iY",
     authDomain: "game-49172.firebaseapp.com",
@@ -14,17 +13,14 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-
-// 2. Adsgram va Telegram Init
 const AdController = window.Adsgram.init({ blockId: "int-20566" });
+
 const tg = window.Telegram.WebApp;
 tg.expand();
-
-// Haqiqiy Telegram ID ni olish
 const user = tg.initDataUnsafe?.user || { id: "12345678", first_name: "Guest" };
 const tgId = user.id.toString();
 
-// DOM elementlar
+// Elementlar
 const multiplierDisplay = document.getElementById('multiplier-display');
 const crashMsg = document.getElementById('crash-msg');
 const balanceEl = document.getElementById('balance-val');
@@ -37,29 +33,28 @@ const historyList = document.getElementById('history-list');
 document.getElementById('user-name').innerText = user.first_name;
 document.getElementById('user-id').innerText = "ID: " + tgId;
 
-// 3. O'yin sozlamalari (Siz so'ragan x koeffitsientlar hovuzi)
-const crashPool = [1.1, 1.5, 2.0, 1.2, 5.0, 1.8, 3.5, 1.3, 10.0, 1.4, 2.8, 4.2, 1.5, 7.5, 1.05, 12.0];
+const crashPool = [1.1, 1.5, 2.0, 1.2, 5.0, 1.8, 3.5, 1.3, 10.0, 1.4, 2.8, 4.2, 1.5, 7.5];
 let myBalance = 0;
-let isJoined = false;
-let isWaitingForNext = false;
+let isJoined = false;           // Hozirgi raundda qatnashyaptimi?
+let isWaitingForNext = false;   // Reklama ko'rib bo'lib, navbatda turibdimi?
 let currentGameState = "idle";
 
 const userRef = ref(db, 'users/' + tgId);
 const gameRef = ref(db, 'live_game');
 const historyRef = ref(db, 'history');
 
-// Balansni kuzatish
+// Balansni yuklash (Bazadan 0 bo'lsa 5000 beradi, xohlasangiz 0 qiling)
 onValue(userRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
         myBalance = data.balance || 0;
         balanceEl.innerText = Math.floor(myBalance);
     } else {
-        set(userRef, { balance: 0, name: user.first_name });
+        set(userRef, { balance: 5000, name: user.first_name });
     }
 });
 
-// 4. O'yin holati sinxronizatsiyasi
+// O'yin holatini kuzatish
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
@@ -73,17 +68,16 @@ onValue(gameRef, (snapshot) => {
         crashMsg.style.display = "none";
         nextRoundTimer.style.display = "none";
 
-        if (isWaitingForNext) {
-            isJoined = true;
-            isWaitingForNext = false;
-        }
-
+        // Agar foydalanuvchi raund boshida (crashed holatida) qo'shilgan bo'lsa
         if (isJoined) {
-            joinBtn.innerText = "O'YINDASIZ";
-            joinBtn.className = "playing";
             joinBtn.disabled = true;
+            joinBtn.innerText = "O'YINDASIZ";
+            joinBtn.classList.add('playing');
             cashoutBtn.disabled = false;
-            cashoutBtn.innerText = `OLISH (${Math.floor(m)} s.)`;
+        } else if (isWaitingForNext) {
+            joinBtn.disabled = true;
+            joinBtn.innerText = "NAVBTADAGI RAUNDNI KUTING...";
+            joinBtn.classList.add('waiting');
         }
     } 
     else if (currentGameState === "crashed") {
@@ -91,49 +85,58 @@ onValue(gameRef, (snapshot) => {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
         cashoutBtn.disabled = true;
-        cashoutBtn.innerText = "Pulni olish";
 
         if (data.nextIn > 0) {
             nextRoundTimer.style.display = "block";
             timerSec.innerText = data.nextIn;
         }
 
-        isJoined = false;
-        if (!isWaitingForNext) {
+        // MUHIM: Portlagan paytda navbatda turganlarni avtomatik o'yinga qo'shish
+        if (isWaitingForNext) {
+            isJoined = true;
+            isWaitingForNext = false;
+        } else {
+            // Agar navbatda bo'lmasa va o'yindan chiqqan bo'lsa
+            isJoined = false;
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
-            joinBtn.className = "";
-        } else {
-            joinBtn.innerText = "Navbatdasiz...";
-            joinBtn.className = "waiting";
+            joinBtn.classList.remove('playing', 'waiting');
         }
     }
 });
 
-// 5. Reklama va O'yinga kirish
+// Reklama ko'rish va navbatga turish
 joinBtn.onclick = async () => {
     joinBtn.disabled = true;
     joinBtn.innerText = "Reklama yuklanmoqda...";
-    
+
     try {
         const result = await AdController.show();
         if (result && result.done) {
-            isWaitingForNext = true;
-            joinBtn.innerText = "Navbatdasiz...";
-            joinBtn.className = "waiting";
+            // Reklama muvaffaqiyatli ko'rildi
+            if (currentGameState === "crashed") {
+                // Agar o'yin to'xtab turgan bo'lsa, darrov kiradi
+                isJoined = true;
+                joinBtn.innerText = "O'YINDASIZ (Kuting)";
+                joinBtn.classList.add('playing');
+            } else {
+                // Agar o'yin uchayotgan bo'lsa, navbatga qo'yiladi
+                isWaitingForNext = true;
+                joinBtn.innerText = "NAVBTADA... (Keyingi raund)";
+                joinBtn.classList.add('waiting');
+            }
             tg.HapticFeedback.impactOccurred('medium');
         } else {
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         }
     } catch (e) {
-        console.error("Adsgram error:", e);
         joinBtn.disabled = false;
-        joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
+        joinBtn.innerText = "Xatolik! Qaytadan urinish";
     }
 };
 
-// 6. Cashout (Pul yig'ish)
+// Pulni olish
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
         const currentM = parseFloat(multiplierDisplay.innerText);
@@ -142,29 +145,26 @@ cashoutBtn.onclick = () => {
         myBalance += win;
         update(userRef, { balance: myBalance });
         
-        // Tarixga qo'shish
         push(historyRef, { uid: tgId, coeff: currentM.toFixed(2), amount: win });
 
-        isJoined = false;
+        isJoined = false; // O'yindan chiqdi
         cashoutBtn.disabled = true;
         joinBtn.disabled = false;
         joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
-        joinBtn.className = "";
+        joinBtn.classList.remove('playing', 'waiting');
         tg.HapticFeedback.notificationOccurred('success');
     }
 };
 
-// 7. AVTOMATIK MASTER LOOP (Server mantiqi)
+// MASTER LOOP (Server mantiqi)
 function startMasterLoop() {
     setInterval(async () => {
         if (currentGameState === "idle" || !currentGameState) {
-            // Raundlar orasidagi 15 soniyalik taymer
             for (let i = 15; i >= 0; i--) {
                 await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            // Uchishni boshlash
             const target = crashPool[Math.floor(Math.random() * crashPool.length)];
             let curr = 1.00;
             await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
@@ -178,14 +178,14 @@ function startMasterLoop() {
                 } else {
                     update(gameRef, { multiplier: curr });
                 }
-            }, 70);
+            }, 80);
         }
     }, 2000);
 }
 
 startMasterLoop();
 
-// Tarixni chiqarish
+// Tarix
 onValue(historyRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
