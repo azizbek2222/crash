@@ -36,9 +36,6 @@ const historyList = document.getElementById('history-list');
 document.getElementById('user-name').innerText = user.first_name;
 document.getElementById('user-id').innerText = "ID: " + tgId;
 
-// CRASH POOL - Portlash koeffitsientlari shundan olinadi
-const crashPool = [1.2, 1.5, 2.8, 1.1, 5.0, 1.3, 3.5, 1.8, 10.0, 1.4, 2.2, 4.0];
-
 let myBalance = 0;
 let isJoined = false;
 let isWaitingNext = false;
@@ -136,29 +133,29 @@ onValue(lockRef, (snap) => {
     }
 });
 
-// SERVER LOGICASI - CRASH POOL BILAN
+// SERVER LOGICASI - TASODIFIY PORTLASH BILAN
 async function startServerLogic() {
     while (activeLoop) {
-        // 1. Kutish bosqichi (15 soniya)
+        // 1. Kutish bosqichi
         for (let i = 15; i >= 0; i--) {
             if (!activeLoop) return;
             await set(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
             await new Promise(r => setTimeout(r, 1000));
         }
 
-        // 2. Uchish bosqichi (Target endi CrashPool massividan olinadi)
-        const target = crashPool[Math.floor(Math.random() * crashPool.length)];
+        // 2. Uchish bosqichi (TASODIFIY 1.1x dan 11.1x gacha)
+        const target = (Math.random() * 15 + 1.1).toFixed(2);
         let curr = 1.00;
         await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
 
         const fly = await new Promise((resolve) => {
             const intv = setInterval(async () => {
                 if (!activeLoop) { clearInterval(intv); resolve(); return; }
-                curr += 0.01;
+                curr += 0.02;
                 if (curr >= target) {
                     clearInterval(intv);
                     await set(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
-                    setTimeout(resolve, 3000); // Portlagandan keyin 3s kutish
+                    setTimeout(resolve, 3000); 
                 } else {
                     update(gameRef, { multiplier: curr });
                 }
