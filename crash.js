@@ -82,9 +82,6 @@ onValue(gameRef, (snapshot) => {
             joinBtn.disabled = true;
             joinBtn.innerText = "NAVBTADA...";
             cashoutBtn.disabled = true;
-        } else {
-            joinBtn.disabled = true;
-            joinBtn.innerText = "KUTING...";
         }
     } 
     else if (currentGameState === "crashed") {
@@ -99,17 +96,19 @@ onValue(gameRef, (snapshot) => {
             timerSec.innerText = data.nextIn;
         }
 
-        // Navbatda turganlar keyingi raundga kiradi
+        // Navbatda turganlarni o'yinga kiritish
         if (isWaitingNext) {
             isJoined = true;
             isWaitingNext = false;
-        } else {
-            // Agar pulni olishga ulgurmagan bo'lsa (isJoined hali true bo'lsa), false qilamiz
-            isJoined = false;
         }
 
-        // Agar foydalanuvchi o'yinda bo'lmasa tugmani ochamiz
-        if (!isJoined && !isWaitingNext) {
+        // AGAR foydalanuvchi hozirgina qo'shilgan bo'lsa (isJoined true), 
+        // uni faqat samolyot uchishni boshlaganda (flying) o'yindan chiqaramiz.
+        // Hozir crashed holatida uni o'yindan chiqarmaymiz, faqat tugmani ko'rsatamiz.
+        if (isJoined) {
+            joinBtn.disabled = true;
+            joinBtn.innerText = "O'YINDASIZ";
+        } else if (!isWaitingNext) {
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         }
@@ -160,6 +159,7 @@ async function startServerLogic() {
                 curr += 0.02;
                 if (curr >= target) {
                     clearInterval(intv);
+                    // O'yin tugaganda bazaga crashed holatini yuborish
                     await set(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
                     setTimeout(resolve, 3000);
                 } else {
@@ -170,42 +170,36 @@ async function startServerLogic() {
     }
 }
 
-// 4. Tugmalar logicasi - REKLAMADAN KEYIN QO'SHILISH TUZATILDI
+// 4. Tugmalar logicasi
 joinBtn.onclick = async () => {
     if (isJoined || isWaitingNext) return;
     
-    // Foydalanuvchiga jarayon boshlanganini bildirish
     joinBtn.disabled = true;
-    joinBtn.innerText = "REKLAMA YUKLANMOQDA...";
+    joinBtn.innerText = "YUKLANMOQDA...";
 
     try {
         const res = await AdController.show();
         if (res && res.done) {
-            // Reklama muvaffaqiyatli tugadi
             if (currentGameState === "crashed") {
-                isJoined = true;
+                isJoined = true; // Raund tugagan bo'lsa darhol qo'shiladi
                 isWaitingNext = false;
-                joinBtn.innerText = "O'YINDASIZ";
             } else {
-                isWaitingNext = true;
+                isWaitingNext = true; // Uchayotgan bo'lsa navbatga turadi
                 isJoined = false;
-                joinBtn.innerText = "NAVBTADA...";
             }
             tg.HapticFeedback.notificationOccurred('success');
         } else {
-            // Reklama oxirigacha ko'rilmadi
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
-            tg.HapticFeedback.notificationOccurred('error');
         }
     } catch (e) {
-        console.error("Ad error:", e);
         joinBtn.disabled = false;
         joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
     }
 };
 
 cashoutBtn.onclick = () => {
+    // FAQAT uchayotgan vaqtda pul olish mumkin
     if (isJoined && currentGameState === "flying") {
         const currentM = parseFloat(multiplierDisplay.innerText.replace('x', ''));
         const win = Math.floor(currentM); 
@@ -220,8 +214,7 @@ cashoutBtn.onclick = () => {
                 amount: win 
             });
 
-            isJoined = false;
-            isWaitingNext = false;
+            isJoined = false; // Pul olindi -> status o'chdi
             cashoutBtn.disabled = true;
             cashoutBtn.innerText = "Pulni olish";
             joinBtn.disabled = false;
