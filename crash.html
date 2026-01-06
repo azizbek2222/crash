@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Crash Real-Time FIX</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+    <link rel="stylesheet" href="crash.css">
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <div class="user-info">
+                <span id="user-name">Foydalanuvchi</span><br>
+                <small id="user-id">ID: ...</small>
+            </div>
+            <div class="balance-card">
+                <span id="balance-val">0</span> so'm
+            </div>
+        </div>
+
+        <div class="graph-area">
+            <div id="multiplier-display">1.00x</div>
+            <div id="crash-msg" style="display: none;">PORTLADI!</div>
+            <div id="next-round-timer" style="display: none;">
+                Keyingi raund: <span id="timer-sec">15</span>s
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="join-btn">O'yinga qo'shilish (Reklama)</button>
+            <button id="cashout-btn" disabled>Pulni olish (0 s.)</button>
+        </div>
+
+        <div class="history-section">
+            <h4>Joriy raund natijalari</h4>
+            <div id="history-list"></div>
+        </div>
+    </div>
+    <script type="module" src="crash.js"></script>
+</body>
+</html>
