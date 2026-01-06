@@ -60,10 +60,7 @@ onValue(userRef, (snapshot) => {
 // 2. O'yin holatini kuzatish (UI Yangilash)
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
-    if (!data) {
-        currentGameState = "idle";
-        return;
-    }
+    if (!data) return;
 
     currentGameState = data.status || "idle";
     const m = data.multiplier || 1.00;
@@ -84,11 +81,17 @@ onValue(gameRef, (snapshot) => {
         } else if (isWaitingNext) {
             joinBtn.disabled = true;
             joinBtn.innerText = "NAVBTADA...";
+            cashoutBtn.disabled = true;
         }
     } 
     else if (currentGameState === "crashed") {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
+        
+        // AGAR FOYDALANUVCHI PULNI OLISHGA ULGURMAGAN BO'LSA
+        // Uni o'yindan chiqaramiz, shunda u yana reklama ko'rishi kerak bo'ladi
+        isJoined = false; 
+
         cashoutBtn.disabled = true;
         cashoutBtn.innerText = "Pulni olish";
 
@@ -97,10 +100,14 @@ onValue(gameRef, (snapshot) => {
             timerSec.innerText = data.nextIn;
         }
 
+        // Navbatda turganlar keyingi raundga kiradi
         if (isWaitingNext) {
             isJoined = true;
             isWaitingNext = false;
-        } else if (!isJoined) {
+        }
+
+        // Agar foydalanuvchi o'yinda bo'lmasa (yoki yutqazgan bo'lsa) tugmani ochamiz
+        if (!isJoined && !isWaitingNext) {
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         }
@@ -133,33 +140,30 @@ onValue(lockRef, (snap) => {
     }
 });
 
-// SERVER LOGICASI - TASODIFIY PORTLASH BILAN
 async function startServerLogic() {
     while (activeLoop) {
-        // 1. Kutish bosqichi
         for (let i = 15; i >= 0; i--) {
             if (!activeLoop) return;
             await set(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
             await new Promise(r => setTimeout(r, 1000));
         }
 
-        // 2. Uchish bosqichi (TASODIFIY 1.1x dan 11.1x gacha)
-        const target = (Math.random() * 15 + 1.1).toFixed(2);
+        const target = (Math.random() * 10 + 1.1).toFixed(2);
         let curr = 1.00;
         await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
 
         const fly = await new Promise((resolve) => {
             const intv = setInterval(async () => {
                 if (!activeLoop) { clearInterval(intv); resolve(); return; }
-                curr += 0.02;
+                curr += 0.02; // Tezlashtirilgan uchish
                 if (curr >= target) {
                     clearInterval(intv);
                     await set(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
-                    setTimeout(resolve, 3000); 
+                    setTimeout(resolve, 3000);
                 } else {
                     update(gameRef, { multiplier: curr });
                 }
-            }, 100);
+            }, 50); // Silliq harakat
         });
     }
 }
@@ -170,8 +174,13 @@ joinBtn.onclick = async () => {
     try {
         const res = await AdController.show();
         if (res?.done) {
-            if (currentGameState === "crashed") isJoined = true;
-            else isWaitingNext = true;
+            // Agar hozir portlagan vaqt bo'lsa, darhol o'yinga kiradi
+            // Agar uchayotgan bo'lsa, navbatga qo'yiladi
+            if (currentGameState === "crashed") {
+                isJoined = true;
+            } else {
+                isWaitingNext = true;
+            }
             tg.HapticFeedback.impactOccurred('medium');
         }
     } catch (e) { console.error("Ad error"); }
@@ -192,7 +201,7 @@ cashoutBtn.onclick = () => {
                 amount: win 
             });
 
-            isJoined = false;
+            isJoined = false; // Pulni oldi -> O'yindan chiqdi
             cashoutBtn.disabled = true;
             cashoutBtn.innerText = "Pulni olish";
             
