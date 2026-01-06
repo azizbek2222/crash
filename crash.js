@@ -82,16 +82,15 @@ onValue(gameRef, (snapshot) => {
             joinBtn.disabled = true;
             joinBtn.innerText = "NAVBTADA...";
             cashoutBtn.disabled = true;
+        } else {
+            joinBtn.disabled = true;
+            joinBtn.innerText = "KUTING...";
         }
     } 
     else if (currentGameState === "crashed") {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
         
-        // AGAR FOYDALANUVCHI PULNI OLISHGA ULGURMAGAN BO'LSA
-        // Uni o'yindan chiqaramiz, shunda u yana reklama ko'rishi kerak bo'ladi
-        isJoined = false; 
-
         cashoutBtn.disabled = true;
         cashoutBtn.innerText = "Pulni olish";
 
@@ -104,9 +103,12 @@ onValue(gameRef, (snapshot) => {
         if (isWaitingNext) {
             isJoined = true;
             isWaitingNext = false;
+        } else {
+            // Agar pulni olishga ulgurmagan bo'lsa (isJoined hali true bo'lsa), false qilamiz
+            isJoined = false;
         }
 
-        // Agar foydalanuvchi o'yinda bo'lmasa (yoki yutqazgan bo'lsa) tugmani ochamiz
+        // Agar foydalanuvchi o'yinda bo'lmasa tugmani ochamiz
         if (!isJoined && !isWaitingNext) {
             joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
@@ -155,7 +157,7 @@ async function startServerLogic() {
         const fly = await new Promise((resolve) => {
             const intv = setInterval(async () => {
                 if (!activeLoop) { clearInterval(intv); resolve(); return; }
-                curr += 0.02; // Tezlashtirilgan uchish
+                curr += 0.02;
                 if (curr >= target) {
                     clearInterval(intv);
                     await set(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
@@ -163,27 +165,44 @@ async function startServerLogic() {
                 } else {
                     update(gameRef, { multiplier: curr });
                 }
-            }, 50); // Silliq harakat
+            }, 50);
         });
     }
 }
 
-// 4. Tugmalar logicasi
+// 4. Tugmalar logicasi - REKLAMADAN KEYIN QO'SHILISH TUZATILDI
 joinBtn.onclick = async () => {
     if (isJoined || isWaitingNext) return;
+    
+    // Foydalanuvchiga jarayon boshlanganini bildirish
+    joinBtn.disabled = true;
+    joinBtn.innerText = "REKLAMA YUKLANMOQDA...";
+
     try {
         const res = await AdController.show();
-        if (res?.done) {
-            // Agar hozir portlagan vaqt bo'lsa, darhol o'yinga kiradi
-            // Agar uchayotgan bo'lsa, navbatga qo'yiladi
+        if (res && res.done) {
+            // Reklama muvaffaqiyatli tugadi
             if (currentGameState === "crashed") {
                 isJoined = true;
+                isWaitingNext = false;
+                joinBtn.innerText = "O'YINDASIZ";
             } else {
                 isWaitingNext = true;
+                isJoined = false;
+                joinBtn.innerText = "NAVBTADA...";
             }
-            tg.HapticFeedback.impactOccurred('medium');
+            tg.HapticFeedback.notificationOccurred('success');
+        } else {
+            // Reklama oxirigacha ko'rilmadi
+            joinBtn.disabled = false;
+            joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
+            tg.HapticFeedback.notificationOccurred('error');
         }
-    } catch (e) { console.error("Ad error"); }
+    } catch (e) {
+        console.error("Ad error:", e);
+        joinBtn.disabled = false;
+        joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
+    }
 };
 
 cashoutBtn.onclick = () => {
@@ -201,9 +220,12 @@ cashoutBtn.onclick = () => {
                 amount: win 
             });
 
-            isJoined = false; // Pulni oldi -> O'yindan chiqdi
+            isJoined = false;
+            isWaitingNext = false;
             cashoutBtn.disabled = true;
             cashoutBtn.innerText = "Pulni olish";
+            joinBtn.disabled = false;
+            joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
             
             document.getElementById('balance-val').innerText = Math.floor(myBalance);
             tg.HapticFeedback.notificationOccurred('success');
