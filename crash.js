@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, onValue, set, update, push, runTransaction, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { getDatabase, ref, onValue, set, update, push, get, remove, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
 // 1. Firebase Konfiguratsiyasi
 const firebaseConfig = {
@@ -20,7 +20,8 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 tg.ready();
 
-const user = tg.initDataUnsafe?.user || { id: 12345678, first_name: "Mehmon" };
+// Telegramdan foydalanuvchi ma'lumotlarini olish
+const user = tg.initDataUnsafe?.user || { id: "12345678", first_name: "Mehmon" };
 const tgId = user.id.toString();
 
 // UI Elementlar
@@ -44,10 +45,10 @@ let activeLoop = false;
 
 const userRef = ref(db, 'users/' + tgId);
 const gameRef = ref(db, 'live_game');
-const historyRef = ref(db, 'history');
+const queueRef = ref(db, 'admin_queue');
 const lockRef = ref(db, 'game_lock');
 
-// 1. Balansni yuklash
+// Balansni kuzatish
 onValue(userRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
@@ -58,14 +59,13 @@ onValue(userRef, (snapshot) => {
     }
 });
 
-// 2. O'yin holatini kuzatish (UI Yangilash)
+// O'yin holatini kuzatish (UI)
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
 
     currentGameState = data.status || "idle";
     const m = data.multiplier || 1.00;
-
     multiplierDisplay.innerText = m.toFixed(2) + "x";
 
     if (currentGameState === "flying") {
@@ -78,25 +78,24 @@ onValue(gameRef, (snapshot) => {
             joinBtn.innerText = "O'YINDASIZ";
             cashoutBtn.disabled = false;
             cashoutBtn.innerText = `OLISH (${Math.floor(m)} so'm)`;
+        } else if (isWaitingNext) {
+            joinBtn.disabled = true;
+            joinBtn.innerText = "NAVBTADA...";
         }
-    } 
-    else if (currentGameState === "crashed") {
+    } else if (currentGameState === "crashed") {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
+        nextRoundTimer.style.display = "block";
+        timerSec.innerText = data.nextIn || 0;
         
-        if (data.nextIn !== undefined) {
-            nextRoundTimer.style.display = "block";
-            timerSec.innerText = data.nextIn;
-        }
-
         cashoutBtn.disabled = true;
-        cashoutBtn.innerText = "Pulni olish";
 
         if (isJoined && data.nextIn === 15) {
-            isJoined = false; 
+            isJoined = false;
             tg.HapticFeedback.notificationOccurred('error');
         }
-
+        
+        // Keyingi raundga o'tish
         if (isWaitingNext && data.nextIn <= 1) {
             isJoined = true;
             isWaitingNext = false;
@@ -109,80 +108,57 @@ onValue(gameRef, (snapshot) => {
     }
 });
 
-// 3. SERVER LOCK TIZIMI (KIM BIRINCHI KIRSA SHU SERVER)
+// Server Lock (Master) mantiqi
 async function claimServer() {
     const now = Date.now();
-    try {
-        await runTransaction(lockRef, (currentLock) => {
-            // Agar hech kim server bo'lmasa yoki server 8 soniyadan beri javob bermasa
-            if (!currentLock || (now - currentLock.lastSeen > 8000)) {
-                return { holder: tgId, lastSeen: now };
-            }
-            // Agar men o'zim server bo'lsam, vaqtni yangilayman
-            if (currentLock.holder === tgId) {
-                return { holder: tgId, lastSeen: now };
-            }
-            // Aks holda tegmaymiz
-            return;
-        });
-    } catch (e) {
-        console.error("Lock error", e);
-    }
+    await runTransaction(lockRef, (lock) => {
+        if (!lock || (now - lock.lastSeen > 8000)) return { holder: tgId, lastSeen: now };
+        if (lock.holder === tgId) return { holder: tgId, lastSeen: now };
+        return;
+    });
 }
-
-// Serverlikni tekshirish
 setInterval(claimServer, 3000);
 
 onValue(lockRef, (snap) => {
     const lock = snap.val();
-    if (lock && lock.holder === tgId) {
-        if (!activeLoop) {
-            activeLoop = true;
-            startServerLogic();
-        }
-    } else {
+    if (lock && lock.holder === tgId && !activeLoop) {
+        activeLoop = true;
+        startServerLogic();
+    } else if (lock && lock.holder !== tgId) {
         activeLoop = false;
     }
 });
 
-// 4. SERVER MANTIQI (FAQAT MASTER FOYDALANUVCHIDA ISHLAYDI)
+// Admin koeffitsientlari bilan ishlash
 async function startServerLogic() {
     while (activeLoop) {
-        const snapshot = await get(gameRef);
-        const data = snapshot.val() || {};
-        
-        // Agar o'yin crashed bo'lsa yoki endi boshlanayotgan bo'lsa
-        if (data.status === "crashed" || !data.status) {
-            let startTimer = data.nextIn || 15;
-            for (let i = startTimer; i >= 0; i--) {
-                if (!activeLoop) return;
-                await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
-                await new Promise(r => setTimeout(r, 1000));
-            }
+        for (let i = 15; i >= 0; i--) {
+            if (!activeLoop) return;
+            await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
+            await new Promise(r => setTimeout(r, 1000));
         }
 
-        // Uchishni boshlash (To'xtagan joyidan davom etishi mumkin)
-        let curr = (data.status === "flying") ? (data.multiplier || 1.00) : 1.00;
-        const target = parseFloat((Math.random() * 7 + 1.1).toFixed(2));
-        
-        await update(gameRef, { status: "flying", multiplier: curr, nextIn: 0 });
+        const queueSnap = await get(queueRef);
+        let target = 2.00;
+        if (queueSnap.exists()) {
+            const keys = Object.keys(queueSnap.val());
+            const firstKey = keys[0];
+            target = parseFloat(queueSnap.val()[firstKey].value);
+            await remove(ref(db, `admin_queue/${firstKey}`));
+        }
+
+        let curr = 1.00;
+        await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
 
         await new Promise((resolve) => {
             const intv = setInterval(async () => {
-                if (!activeLoop) { 
-                    clearInterval(intv); 
-                    resolve(); 
-                    return; 
-                }
-
-                curr += 0.03;
-                
+                if (!activeLoop) { clearInterval(intv); resolve(); return; }
+                curr += 0.04;
                 if (curr >= target) {
                     clearInterval(intv);
                     await update(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
                     setTimeout(resolve, 3000);
                 } else {
-                    // Muhim: update ishlatamiz, butun bazani emas
                     update(gameRef, { multiplier: curr });
                 }
             }, 100);
@@ -190,67 +166,29 @@ async function startServerLogic() {
     }
 }
 
-// 5. TUGMALAR LOGIKASI
+// Reklama va Qo'shilish
 joinBtn.onclick = async () => {
-    if (isJoined || isWaitingNext) return;
-    
-    joinBtn.disabled = true;
-    joinBtn.innerText = "YUKLANMOQDA...";
-
     try {
         const res = await AdController.show();
         if (res && res.done) {
             if (currentGameState === "crashed") {
                 isJoined = true;
-                isWaitingNext = false;
             } else {
                 isWaitingNext = true;
-                isJoined = false;
             }
             tg.HapticFeedback.notificationOccurred('success');
-        } else {
-            joinBtn.disabled = false;
-            joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         }
-    } catch (e) {
-        joinBtn.disabled = false;
-        joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
-    }
+    } catch (e) { console.error("Ad Error", e); }
 };
 
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
-        const currentM = parseFloat(multiplierDisplay.innerText.replace('x', ''));
-        const win = Math.floor(currentM); 
-
-        if (win > 0) {
-            myBalance += win;
-            update(userRef, { balance: myBalance });
-            
-            push(historyRef, { 
-                uid: tgId, 
-                coeff: currentM.toFixed(2) + "x", 
-                amount: win 
-            });
-
-            isJoined = false;
-            cashoutBtn.disabled = true;
-            joinBtn.disabled = false;
-            joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
-            tg.HapticFeedback.notificationOccurred('success');
-        }
+        const m = parseFloat(multiplierDisplay.innerText);
+        const win = Math.floor(m);
+        myBalance += win;
+        update(userRef, { balance: myBalance });
+        push(ref(db, 'history'), { uid: tgId, coeff: m.toFixed(2) + "x", amount: win });
+        isJoined = false;
+        tg.HapticFeedback.notificationOccurred('success');
     }
 };
-
-// 6. TARIXNI YUKLASH
-onValue(historyRef, (snapshot) => {
-    const data = snapshot.val();
-    if (!data) return;
-    historyList.innerHTML = "";
-    Object.values(data).reverse().slice(0, 5).forEach(item => {
-        const div = document.createElement('div');
-        div.className = "history-item";
-        div.innerHTML = `<span>ID: ${item.uid}</span> <b>${item.coeff}x</b> <span style="color:#10b981">+${item.amount}</span>`;
-        historyList.appendChild(div);
-    });
-});
