@@ -56,11 +56,11 @@ onValue(userRef, (snapshot) => {
     }
 });
 
-// 2. O'yin holatini kuzatish (UI Yangilash)
+// 2. O'yin holatini kuzatish (UI Yangilash) - SHU YERDA TUGMA TEXTI TO'G'RILANDI
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) {
-        currentGameState = "idle"; // Baza bo'sh bo'lsa "idle" qilamiz
+        currentGameState = "idle";
         return;
     }
 
@@ -77,7 +77,11 @@ onValue(gameRef, (snapshot) => {
         if (isJoined) {
             joinBtn.disabled = true;
             joinBtn.innerText = "O'YINDASIZ";
+            
+            // Tugma textini har 1x uchun 1 som mantiqi bilan yangilash
+            const joriyYutuq = Math.floor(m);
             cashoutBtn.disabled = false;
+            cashoutBtn.innerText = `OLISH (${joriyYutuq} so'm)`;
         } else if (isWaitingNext) {
             joinBtn.disabled = true;
             joinBtn.innerText = "NAVBTADA...";
@@ -86,7 +90,10 @@ onValue(gameRef, (snapshot) => {
     else if (currentGameState === "crashed") {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
+        
+        // Portlaganda tugmani holatini qaytarish
         cashoutBtn.disabled = true;
+        cashoutBtn.innerText = "Pulni olish";
 
         if (data.nextIn !== undefined) {
             nextRoundTimer.style.display = "block";
@@ -103,7 +110,7 @@ onValue(gameRef, (snapshot) => {
     }
 });
 
-// 3. LOCK TIZIMI (Faqat bitta foydalanuvchi "Server" bo'ladi)
+// 3. LOCK TIZIMI (O'zgarishsiz)
 async function claimServer() {
     const now = Date.now();
     await runTransaction(lockRef, (lock) => {
@@ -118,7 +125,6 @@ async function claimServer() {
 }
 setInterval(claimServer, 4000);
 
-// Server egasini tekshirish va Loopni boshqarish
 let activeLoop = false;
 onValue(lockRef, (snap) => {
     const lock = snap.val();
@@ -126,20 +132,18 @@ onValue(lockRef, (snap) => {
         activeLoop = true;
         startServerLogic();
     } else if (lock && lock.holder !== tgId) {
-        activeLoop = false; // Men server emasman
+        activeLoop = false;
     }
 });
 
 async function startServerLogic() {
     while (activeLoop) {
-        // 1. Kutish bosqichi
         for (let i = 15; i >= 0; i--) {
             if (!activeLoop) return;
             await set(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
             await new Promise(r => setTimeout(r, 1000));
         }
 
-        // 2. Uchish bosqichi
         const target = (Math.random() * 4 + 1.1).toFixed(2);
         let curr = 1.00;
         await update(gameRef, { status: "flying", nextIn: 0 });
@@ -151,7 +155,7 @@ async function startServerLogic() {
                 if (curr >= target) {
                     clearInterval(intv);
                     await set(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
-                    setTimeout(resolve, 3000); // Portlagandan keyin 3s kutish
+                    setTimeout(resolve, 3000);
                 } else {
                     update(gameRef, { multiplier: curr });
                 }
@@ -160,7 +164,7 @@ async function startServerLogic() {
     }
 }
 
-// 4. Tugmalar logicasi
+// 4. Tugmalar logicasi (O'zgarishsiz)
 joinBtn.onclick = async () => {
     if (isJoined || isWaitingNext) return;
     try {
@@ -177,14 +181,13 @@ cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
         const currentM = parseFloat(multiplierDisplay.innerText.replace('x', ''));
         
-        // Mantiq: 1x = 1 so'm, 2x = 2 so'm, 3x = 3 so'm
+        // Mantiq: 1x = 1 so'm
         const win = Math.floor(currentM); 
 
         if (win > 0) {
             myBalance += win;
             update(userRef, { balance: myBalance });
             
-            // Tarixga yozish
             push(historyRef, { 
                 uid: tgId, 
                 coeff: currentM.toFixed(2) + "x", 
@@ -195,14 +198,13 @@ cashoutBtn.onclick = () => {
             cashoutBtn.disabled = true;
             cashoutBtn.innerText = "Pulni olish";
             
-            // UI va effektlar
             document.getElementById('balance-val').innerText = Math.floor(myBalance);
             tg.HapticFeedback.notificationOccurred('success');
         }
     }
 };
 
-// 5. Tarix
+// 5. Tarix (O'zgarishsiz)
 onValue(historyRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
