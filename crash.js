@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getDatabase, ref, onValue, set, update, push } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
+// 1. Firebase Konfiguratsiyasi
 const firebaseConfig = {
     apiKey: "AIzaSyBt_YoPMKJlEL7RAGwWNx6uPJpoOHaQ2iY",
     authDomain: "game-49172.firebaseapp.com",
@@ -13,46 +14,56 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-const AdController = window.Adsgram.init({ blockId: "int-20566" });
 
+// 2. Adsgram va Telegram Init
+const AdController = window.Adsgram.init({ blockId: "int-20566" });
 const tg = window.Telegram.WebApp;
 tg.expand();
-const user = tg.initDataUnsafe?.user || { id: "Guest", first_name: "Mehmon" };
+
+// Haqiqiy Telegram ID ni olish
+const user = tg.initDataUnsafe?.user || { id: "12345678", first_name: "Guest" };
 const tgId = user.id.toString();
 
+// DOM elementlar
 const multiplierDisplay = document.getElementById('multiplier-display');
 const crashMsg = document.getElementById('crash-msg');
 const balanceEl = document.getElementById('balance-val');
 const joinBtn = document.getElementById('join-btn');
 const cashoutBtn = document.getElementById('cashout-btn');
-const historyList = document.getElementById('history-list');
-const nextRoundTimer = document.getElementById('next-round-timer');
 const timerSec = document.getElementById('timer-sec');
+const nextRoundTimer = document.getElementById('next-round-timer');
+const historyList = document.getElementById('history-list');
 
 document.getElementById('user-name').innerText = user.first_name;
 document.getElementById('user-id').innerText = "ID: " + tgId;
 
+// 3. O'yin sozlamalari (Siz so'ragan x koeffitsientlar hovuzi)
+const crashPool = [1.1, 1.5, 2.0, 1.2, 5.0, 1.8, 3.5, 1.3, 10.0, 1.4, 2.8, 4.2, 1.5, 7.5, 1.05, 12.0];
 let myBalance = 0;
-let isJoined = false;           // Hozirgi uchishda bormi?
-let isWaitingForNext = false;   // Keyingi raund uchun navbatdami?
+let isJoined = false;
+let isWaitingForNext = false;
 let currentGameState = "idle";
-const crashPool = [1.1, 2.5, 1.2, 5.0, 1.8, 1.05, 15.0, 3.2, 1.5, 2.0];
 
 const userRef = ref(db, 'users/' + tgId);
 const gameRef = ref(db, 'live_game');
-const historyRef = ref(db, 'current_round_history');
+const historyRef = ref(db, 'history');
 
-// Balansni yuklash
+// Balansni kuzatish
 onValue(userRef, (snapshot) => {
-    myBalance = snapshot.val()?.balance || 0;
-    balanceEl.innerText = Math.floor(myBalance);
+    const data = snapshot.val();
+    if (data) {
+        myBalance = data.balance || 0;
+        balanceEl.innerText = Math.floor(myBalance);
+    } else {
+        set(userRef, { balance: 0, name: user.first_name });
+    }
 });
 
-// O'YIN HOLATINI KUZATISH
+// 4. O'yin holati sinxronizatsiyasi
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
-    
+
     currentGameState = data.status;
     const m = data.multiplier || 1.00;
 
@@ -61,23 +72,18 @@ onValue(gameRef, (snapshot) => {
         multiplierDisplay.style.color = "#3b82f6";
         crashMsg.style.display = "none";
         nextRoundTimer.style.display = "none";
-        
-        // AGAR NAVBATDA TURGAN BO'LSA, UNI O'YINGA QO'SHISH
+
         if (isWaitingForNext) {
             isJoined = true;
             isWaitingForNext = false;
         }
 
         if (isJoined) {
-            joinBtn.innerText = "O'yindasiz";
+            joinBtn.innerText = "O'YINDASIZ";
             joinBtn.className = "playing";
             joinBtn.disabled = true;
             cashoutBtn.disabled = false;
             cashoutBtn.innerText = `OLISH (${Math.floor(m)} s.)`;
-        } else {
-            joinBtn.innerText = "Keyingisini kuting";
-            joinBtn.disabled = true;
-            cashoutBtn.disabled = true;
         }
     } 
     else if (currentGameState === "crashed") {
@@ -85,41 +91,33 @@ onValue(gameRef, (snapshot) => {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
         cashoutBtn.disabled = true;
-        
+        cashoutBtn.innerText = "Pulni olish";
+
         if (data.nextIn > 0) {
             nextRoundTimer.style.display = "block";
             timerSec.innerText = data.nextIn;
-        } else {
-            nextRoundTimer.style.display = "none";
         }
 
-        // Raund tugadi
-        if (isJoined) {
-            isJoined = false;
-            tg.HapticFeedback.notificationOccurred('error');
-        }
-
-        // Tugma holatini yangilash
-        if (isWaitingForNext) {
-            joinBtn.innerText = "Navbatdasiz...";
-            joinBtn.className = "waiting";
-            joinBtn.disabled = true;
-        } else {
+        isJoined = false;
+        if (!isWaitingForNext) {
+            joinBtn.disabled = false;
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
             joinBtn.className = "";
-            joinBtn.disabled = false;
+        } else {
+            joinBtn.innerText = "Navbatdasiz...";
+            joinBtn.className = "waiting";
         }
     }
 });
 
-// Reklama ko'rib qo'shilish
+// 5. Reklama va O'yinga kirish
 joinBtn.onclick = async () => {
     joinBtn.disabled = true;
-    joinBtn.innerText = "Yuklanmoqda...";
+    joinBtn.innerText = "Reklama yuklanmoqda...";
+    
     try {
         const result = await AdController.show();
         if (result && result.done) {
-            // Reklama tugadi, navbatga qo'shamiz
             isWaitingForNext = true;
             joinBtn.innerText = "Navbatdasiz...";
             joinBtn.className = "waiting";
@@ -129,79 +127,73 @@ joinBtn.onclick = async () => {
             joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         }
     } catch (e) {
+        console.error("Adsgram error:", e);
         joinBtn.disabled = false;
         joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
     }
 };
 
-// Cashout
+// 6. Cashout (Pul yig'ish)
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
-        const m = parseFloat(multiplierDisplay.innerText);
-        const win = Math.floor(m);
+        const currentM = parseFloat(multiplierDisplay.innerText);
+        const win = Math.floor(currentM); 
+        
         myBalance += win;
         update(userRef, { balance: myBalance });
-        push(historyRef, { uid: tgId, coeff: m.toFixed(2), amount: win });
         
+        // Tarixga qo'shish
+        push(historyRef, { uid: tgId, coeff: currentM.toFixed(2), amount: win });
+
         isJoined = false;
-        isWaitingForNext = false;
+        cashoutBtn.disabled = true;
+        joinBtn.disabled = false;
         joinBtn.innerText = "O'yinga qo'shilish (Reklama)";
         joinBtn.className = "";
-        joinBtn.disabled = false;
-        cashoutBtn.disabled = true;
         tg.HapticFeedback.notificationOccurred('success');
     }
 };
 
-// MASTER LOOP (Server mantiqi)
-let masterStarted = false;
+// 7. AVTOMATIK MASTER LOOP (Server mantiqi)
 function startMasterLoop() {
-    if (masterStarted) return;
-    masterStarted = true;
-
     setInterval(async () => {
         if (currentGameState === "idle" || !currentGameState) {
-            await set(historyRef, null);
-
-            // 1) 15 soniya kutish
+            // Raundlar orasidagi 15 soniyalik taymer
             for (let i = 15; i >= 0; i--) {
-                await update(gameRef, { status: \"crashed\", multiplier: 1.00, nextIn: i });
+                await update(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            // 2) Uchish
+            // Uchishni boshlash
             const target = crashPool[Math.floor(Math.random() * crashPool.length)];
-            let currentM = 1.00;
-            
-            // O'yinni boshlash
-            await update(gameRef, { status: \"flying\", multiplier: 1.00, nextIn: 0 });
+            let curr = 1.00;
+            await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
 
             const flyInterval = setInterval(async () => {
-                currentM += 0.02; // Tezroq koeffitsient o'sishi
-                if (currentM >= target) {
+                curr += 0.01;
+                if (curr >= target) {
                     clearInterval(flyInterval);
-                    await update(gameRef, { status: \"crashed\", multiplier: currentM, nextIn: 15 });
-                    setTimeout(() => update(gameRef, { status: \"idle\" }), 2000);
+                    await update(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
+                    setTimeout(() => update(gameRef, { status: "idle" }), 2000);
                 } else {
-                    update(gameRef, { multiplier: currentM });
+                    update(gameRef, { multiplier: curr });
                 }
-            }, 100);
+            }, 70);
         }
     }, 2000);
 }
 
 startMasterLoop();
 
-// Tarixni ko'rsatish
+// Tarixni chiqarish
 onValue(historyRef, (snapshot) => {
     const data = snapshot.val();
+    if (!data) return;
     historyList.innerHTML = "";
-    if (data) {
-        Object.values(data).forEach(item => {
-            const div = document.createElement('div');
-            div.className = "history-item";
-            div.innerHTML = `<span>ID: ${item.uid}</span> <b>${item.coeff}x</b> <span style=\"color:#10b981\">+${item.amount} s.</span>`;
-            historyList.appendChild(div);
-        });
-    }
+    Object.values(data).reverse().slice(0, 5).forEach(item => {
+        const div = document.createElement('div');
+        div.className = "history-item";
+        div.innerHTML = `<span>ID: ${item.uid}</span> <b>${item.coeff}x</b> <span style="color:#10b981">+${item.amount} s.</span>`;
+        historyList.appendChild(div);
+    });
 });
