@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getDatabase, ref, onValue, set, update, push, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
+// 1. Firebase Konfiguratsiyasi
 const firebaseConfig = {
     apiKey: "AIzaSyBt_YoPMKJlEL7RAGwWNx6uPJpoOHaQ2iY",
     authDomain: "game-49172.firebaseapp.com",
@@ -35,6 +36,9 @@ const historyList = document.getElementById('history-list');
 document.getElementById('user-name').innerText = user.first_name;
 document.getElementById('user-id').innerText = "ID: " + tgId;
 
+// CRASH POOL - Portlash koeffitsientlari shundan olinadi
+const crashPool = [1.2, 1.5, 2.8, 1.1, 5.0, 1.3, 3.5, 1.8, 10.0, 1.4, 2.2, 4.0];
+
 let myBalance = 0;
 let isJoined = false;
 let isWaitingNext = false;
@@ -56,7 +60,7 @@ onValue(userRef, (snapshot) => {
     }
 });
 
-// 2. O'yin holatini kuzatish (UI Yangilash) - SHU YERDA TUGMA TEXTI TO'G'RILANDI
+// 2. O'yin holatini kuzatish (UI Yangilash)
 onValue(gameRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) {
@@ -77,8 +81,6 @@ onValue(gameRef, (snapshot) => {
         if (isJoined) {
             joinBtn.disabled = true;
             joinBtn.innerText = "O'YINDASIZ";
-            
-            // Tugma textini har 1x uchun 1 som mantiqi bilan yangilash
             const joriyYutuq = Math.floor(m);
             cashoutBtn.disabled = false;
             cashoutBtn.innerText = `OLISH (${joriyYutuq} so'm)`;
@@ -90,8 +92,6 @@ onValue(gameRef, (snapshot) => {
     else if (currentGameState === "crashed") {
         multiplierDisplay.style.color = "#ef4444";
         crashMsg.style.display = "block";
-        
-        // Portlaganda tugmani holatini qaytarish
         cashoutBtn.disabled = true;
         cashoutBtn.innerText = "Pulni olish";
 
@@ -110,7 +110,7 @@ onValue(gameRef, (snapshot) => {
     }
 });
 
-// 3. LOCK TIZIMI (O'zgarishsiz)
+// 3. LOCK TIZIMI
 async function claimServer() {
     const now = Date.now();
     await runTransaction(lockRef, (lock) => {
@@ -136,17 +136,20 @@ onValue(lockRef, (snap) => {
     }
 });
 
+// SERVER LOGICASI - CRASH POOL BILAN
 async function startServerLogic() {
     while (activeLoop) {
+        // 1. Kutish bosqichi (15 soniya)
         for (let i = 15; i >= 0; i--) {
             if (!activeLoop) return;
             await set(gameRef, { status: "crashed", multiplier: 1.00, nextIn: i });
             await new Promise(r => setTimeout(r, 1000));
         }
 
-        const target = (Math.random() * 4 + 1.1).toFixed(2);
+        // 2. Uchish bosqichi (Target endi CrashPool massividan olinadi)
+        const target = crashPool[Math.floor(Math.random() * crashPool.length)];
         let curr = 1.00;
-        await update(gameRef, { status: "flying", nextIn: 0 });
+        await update(gameRef, { status: "flying", multiplier: 1.00, nextIn: 0 });
 
         const fly = await new Promise((resolve) => {
             const intv = setInterval(async () => {
@@ -155,7 +158,7 @@ async function startServerLogic() {
                 if (curr >= target) {
                     clearInterval(intv);
                     await set(gameRef, { status: "crashed", multiplier: curr, nextIn: 15 });
-                    setTimeout(resolve, 3000);
+                    setTimeout(resolve, 3000); // Portlagandan keyin 3s kutish
                 } else {
                     update(gameRef, { multiplier: curr });
                 }
@@ -164,7 +167,7 @@ async function startServerLogic() {
     }
 }
 
-// 4. Tugmalar logicasi (O'zgarishsiz)
+// 4. Tugmalar logicasi
 joinBtn.onclick = async () => {
     if (isJoined || isWaitingNext) return;
     try {
@@ -180,8 +183,6 @@ joinBtn.onclick = async () => {
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
         const currentM = parseFloat(multiplierDisplay.innerText.replace('x', ''));
-        
-        // Mantiq: 1x = 1 so'm
         const win = Math.floor(currentM); 
 
         if (win > 0) {
@@ -204,7 +205,7 @@ cashoutBtn.onclick = () => {
     }
 };
 
-// 5. Tarix (O'zgarishsiz)
+// 5. Tarix
 onValue(historyRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
