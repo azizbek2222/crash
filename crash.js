@@ -175,24 +175,30 @@ joinBtn.onclick = async () => {
 
 cashoutBtn.onclick = () => {
     if (isJoined && currentGameState === "flying") {
-        const m = parseFloat(multiplierDisplay.innerText); // Hozirgi koeffitsient (masalan: 1.50)
+        const currentM = parseFloat(multiplierDisplay.innerText.replace('x', ''));
         
-        // MANA SHU YERDA HISOBLANADI:
-        const win = Math.floor(m * 1); 
-        
-        myBalance += win;
-        update(userRef, { balance: myBalance });
-        
-        // Tarixga yozish
-        push(historyRef, { 
-            uid: tgId, 
-            coeff: m.toFixed(2), 
-            amount: win 
-        });
+        // Mantiq: 1x = 1 so'm, 2x = 2 so'm, 3x = 3 so'm
+        const win = Math.floor(currentM); 
 
-        isJoined = false;
-        cashoutBtn.disabled = true;
-        tg.HapticFeedback.notificationOccurred('success');
+        if (win > 0) {
+            myBalance += win;
+            update(userRef, { balance: myBalance });
+            
+            // Tarixga yozish
+            push(historyRef, { 
+                uid: tgId, 
+                coeff: currentM.toFixed(2) + "x", 
+                amount: win 
+            });
+
+            isJoined = false;
+            cashoutBtn.disabled = true;
+            cashoutBtn.innerText = "Pulni olish";
+            
+            // UI va effektlar
+            document.getElementById('balance-val').innerText = Math.floor(myBalance);
+            tg.HapticFeedback.notificationOccurred('success');
+        }
     }
 };
 
